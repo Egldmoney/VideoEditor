@@ -137,7 +137,8 @@ input[type=range]{width:100%;accent-color:var(--accent)}
         <label for="wpc">Words per caption <output id="wpcOut">4</output></label>
         <input type="range" id="wpc" min="2" max="8" step="1" value="4">
       </div>
-      <button class="btn pri" id="make">Make captions</button>
+      <button class="btn pri" id="auto">Do it all: captions, cuts, quotes, export</button>
+      <button class="btn" id="make">Only make captions</button>
       <div class="status" id="makeStatus"></div>
     </div>
 
@@ -258,6 +259,7 @@ let saveT; const save = () => { clearTimeout(saveT); saveT = setTimeout(() => { 
 
 let hasVideo = false, exporting = false, syncI = -1, rate = 1;
 let actx, msrc, dest, sample = null, downloads = null, lastExport = null;
+let analysisP = Promise.resolve();
 let envDb = null, audioDur = 0, pLo = -60, pHi = -20, cuts = [], keeps = [], rec = null, jumping = false;
 
 /* ---------- text helpers ---------- */
@@ -548,7 +550,7 @@ $('#file').addEventListener('change', e => {
   const f = e.target.files[0]; if (!f) return;
   if (video.src) URL.revokeObjectURL(video.src);
   video.src = URL.createObjectURL(f); video.load();
-  envDb = null; cuts = []; keeps = []; audioDur = 0; analyzeAudio(f);
+  envDb = null; cuts = []; keeps = []; audioDur = 0; analysisP = analyzeAudio(f);
 });
 video.addEventListener('loadedmetadata', () => {
   const vw = video.videoWidth || 1080, vh = video.videoHeight || 1920; const s = Math.min(1, 1920 / Math.max(vw, vh));
@@ -710,6 +712,24 @@ $('#exp').onclick = async () => {
   lastExport = { blob: new Blob(parts, { type }), ext: type.includes('mp4') ? 'mp4' : 'webm' };
   st.textContent = `Done. ${(lastExport.blob.size / 1048576).toFixed(1)} MB ${lastExport.ext.toUpperCase()}.`;
   offerSave();
+};
+
+/* ---------- one-tap automation ---------- */
+$('#auto').onclick = async () => {
+  const st = $('#makeStatus');
+  if (!hasVideo) { st.textContent = 'Open a video first.'; return; }
+  if (!S.script.trim()) { st.textContent = 'Paste your script first.'; return; }
+  if (exporting) return;
+  $('#auto').disabled = true;
+  try {
+    st.textContent = 'Step 1 of 4: finding the pauses…'; await analysisP;
+    st.textContent = 'Step 2 of 4: placing captions over your speech…';
+    S.chunks = makeChunks(S.script, S.wpc); spreadEvenly(); changed();
+    if (sample) { st.textContent = 'Step 3 of 4: Claude is picking the quotes…'; await $('#ai').onclick(); }
+    st.textContent = 'Step 4 of 4: exporting. Keep this screen open.';
+    goTab('export'); await $('#exp').onclick();
+    st.textContent = 'Done. Check the result before you post it.';
+  } finally { $('#auto').disabled = false; }
 };
 
 /* ---------- init ---------- */
