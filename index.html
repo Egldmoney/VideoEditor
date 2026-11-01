@@ -38,6 +38,7 @@ canvas{display:block;max-width:100%;max-height:64vh;width:auto;height:auto;touch
 .time{font-variant-numeric:tabular-nums;color:var(--muted);font-size:13px;min-width:92px}
 .timeline{position:relative;height:34px;background:var(--panel);border:1px solid var(--line);border-radius:8px;margin-top:10px;overflow:hidden;touch-action:none;cursor:pointer}
 .blk{position:absolute;top:6px;bottom:6px;background:var(--panel2);border:1px solid var(--line);border-radius:4px}
+.blk.cut{top:0;bottom:0;border:0;border-radius:0;background:repeating-linear-gradient(135deg,rgba(194,65,45,.4) 0 4px,transparent 4px 8px)}
 .blk.q{background:var(--accent);border-color:transparent;top:3px;bottom:3px}
 .head{position:absolute;top:0;bottom:0;width:2px;background:var(--danger);pointer-events:none}
 .hint{color:var(--muted);font-size:12.5px;margin:8px 2px 0}
@@ -141,7 +142,21 @@ input[type=range]{width:100%;accent-color:var(--accent)}
     </div>
 
     <div class="pane" data-pane="timing">
+      <h2>Cut the silences</h2>
+      <p>Pauses get skipped in the preview and in the export. Captions are spread over the parts where you talk.</p>
+      <label class="switch">Cut silences <input type="checkbox" id="cutOn"></label>
+      <div class="field">
+        <label for="sens">Sensitivity <output id="sensOut"></output></label>
+        <input type="range" id="sens" min="0.1" max="0.7" step="0.05">
+      </div>
+      <div class="field">
+        <label for="minSil">Shortest pause to cut <output id="minSilOut"></output></label>
+        <input type="range" id="minSil" min="0.2" max="1.5" step="0.05">
+      </div>
+      <div class="status" id="cutStatus">Open a video to find the pauses.</div>
+      <div class="sep"></div>
       <h2>Sync to your voice</h2>
+      <p>Captions are already placed over your speech. If a line is off, use tap sync or fine-tune below.</p>
       <p>Press start, then tap the big button the moment you begin saying each line. Space bar works too.</p>
       <div class="row2">
         <button class="btn pri" id="syncStart">Start tap sync</button>
@@ -157,7 +172,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
         <span class="next" id="tapNext"></span>
       </button>
       <div class="row2">
-        <button class="btn sm" id="spread">Spread evenly over the video</button>
+        <button class="btn sm" id="spread">Spread over your speech</button>
       </div>
       <div class="sep"></div>
       <h2>Fine-tune</h2>
@@ -168,6 +183,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
     <div class="pane" data-pane="quotes">
       <h2>Quote moments</h2>
       <p>Quotes appear big in the middle of the screen while you say them, and the small caption hides for that moment.</p>
+      <label class="switch">Every line as a big quote <input type="checkbox" id="allQuotes"></label>
       <button class="btn pri" id="ai">Pick the strongest lines with Claude</button>
       <div class="status" id="aiStatus"></div>
       <div class="qlist" id="qlist"></div>
@@ -236,19 +252,20 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const video = $('#vid'), cv = $('#cv'), ctx = cv.getContext('2d');
 const ACCENTS = ['#FFD84D', '#FF6B57', '#5BE3B0', '#7CB8FF', '#FFFFFF'];
-let S = { script:'', wpc:4, chunks:[], showCaps:true, capStyle:'pop', quoteStyle:'slab', accent:'#FFD84D', capY:0.8, quoteY:0.4, capScale:1, quoteScale:1, rhythm:true, zoomCuts:true, beat:2 };
+let S = { script:'', wpc:4, chunks:[], showCaps:true, capStyle:'pop', quoteStyle:'slab', accent:'#FFD84D', capY:0.8, quoteY:0.4, capScale:1, quoteScale:1, rhythm:true, zoomCuts:true, beat:2, cutOn:true, sens:0.35, minSil:0.45, allQuotes:true, autoTimed:false };
 try { const saved = JSON.parse(localStorage.getItem('cs-state') || 'null'); if (saved) S = Object.assign(S, saved); } catch (e) {}
 let saveT; const save = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem('cs-state', JSON.stringify(S)); } catch (e) {} }, 300); };
 
 let hasVideo = false, exporting = false, syncI = -1, rate = 1;
 let actx, msrc, dest, sample = null, downloads = null, lastExport = null;
+let envDb = null, audioDur = 0, pLo = -60, pHi = -20, cuts = [], keeps = [], rec = null, jumping = false;
 
 /* ---------- text helpers ---------- */
 const words = t => t.trim().split(/\s+/).filter(Boolean);
 const easeOut = k => 1 - Math.pow(1 - k, 3);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const fmt = t => { t = Math.max(0, t || 0); const m = Math.floor(t / 60), s = (t % 60); return m + ':' + (s < 10 ? '0' : '') + s.toFixed(1); };
-const dur = () => (isFinite(video.duration) && video.duration > 0) ? video.duration : 0;
+const dur = () => (isFinite(video.duration) && video.duration > 0) ? video.duration : audioDur;
 
 function makeChunks(script, wpc) {
   const sentences = script.replace(/([.!?…]+["”’)]?)\s+/g, '$1\n').split(/\n+/).map(s => s.trim()).filter(Boolean);
@@ -260,10 +277,54 @@ function makeChunks(script, wpc) {
   return out;
 }
 function spreadEvenly() {
-  const D = dur() || S.chunks.length * 1.6; const lead = 0.15, tail = 0.15;
+  const D = dur() || S.chunks.length * 1.6;
+  const segs = keeps.length ? keeps : [[0.15, Math.max(0.3, D - 0.15)]];
+  const T = segs.reduce((a, s) => a + s[1] - s[0], 0);
+  const s2r = x => { for (const s of segs) { const L = s[1] - s[0]; if (x < L - 1e-6) return s[0] + x; x -= L; } return segs[segs.length - 1][1]; };
   const wts = S.chunks.map(c => words(c.text).length + (c.se ? 0.7 : 0));
-  const W = wts.reduce((a, b) => a + b, 0) || 1; let t = lead;
-  S.chunks.forEach((c, i) => { const d = (D - lead - tail) * wts[i] / W; c.start = t; c.end = t + d; t += d; });
+  const W = wts.reduce((a, b) => a + b, 0) || 1; let x = 0;
+  S.chunks.forEach((c, i) => { c.start = s2r(x); x += T * wts[i] / W; c.end = s2r(x - 1e-4) + 1e-4; });
+  S.autoTimed = true;
+}
+
+/* ---------- silence detection ---------- */
+const decode = (ac, buf) => new Promise((res, rej) => { const p = ac.decodeAudioData(buf, res, rej); if (p && p.then) p.then(res, rej); });
+async function analyzeAudio(file) {
+  const st = $('#cutStatus'); st.classList.remove('err'); st.textContent = 'Listening for pauses…';
+  try {
+    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const audio = await decode(new OAC(1, 1, 44100), await file.arrayBuffer());
+    const sr = audio.sampleRate, win = Math.round(sr * 0.02), n = Math.floor(audio.length / win);
+    const chans = []; for (let c = 0; c < audio.numberOfChannels; c++) chans.push(audio.getChannelData(c));
+    envDb = new Float32Array(n);
+    for (let i = 0; i < n; i++) { let sum = 0; for (const d of chans) for (let j = i * win, e = j + win; j < e; j++) sum += d[j] * d[j]; envDb[i] = 10 * Math.log10(sum / (win * chans.length) + 1e-10); }
+    const sorted = Float32Array.from(envDb).sort(); pLo = sorted[Math.floor(n * 0.1)]; pHi = sorted[Math.floor(n * 0.95)];
+    audioDur = audio.duration;
+    computeCuts(); if (S.chunks.length && S.autoTimed) spreadEvenly(); changed();
+  } catch (e) { envDb = null; cuts = []; keeps = []; st.classList.add('err'); st.textContent = 'Couldn’t read the audio of this video, so no pauses were cut.'; }
+}
+function computeCuts() {
+  cuts = []; keeps = []; const D = dur();
+  if (!envDb || !D) return;
+  const thr = pLo + (pHi - pLo) * S.sens, step = 0.02, pad = 0.12, segs = []; let s = -1;
+  for (let i = 0; i <= envDb.length; i++) { const on = i < envDb.length && envDb[i] > thr; if (on && s < 0) s = i; if (!on && s >= 0) { segs.push([s * step, i * step]); s = -1; } }
+  const merged = []; segs.forEach(g => { const l = merged[merged.length - 1]; if (l && g[0] - l[1] < S.minSil) l[1] = g[1]; else merged.push(g.slice()); });
+  merged.filter(g => g[1] - g[0] >= 0.1).forEach(g => { const k = [Math.max(0, g[0] - pad), Math.min(D, g[1] + pad)], l = keeps[keeps.length - 1]; if (l && k[0] <= l[1]) l[1] = k[1]; else keeps.push(k); });
+  if (!keeps.length) keeps = [[0, D]];
+  let p = 0; keeps.forEach(k => { if (k[0] - p > 0.05) cuts.push([p, k[0]]); p = k[1]; }); if (D - p > 0.05) cuts.push([p, D]);
+}
+function cutStatus() {
+  const st = $('#cutStatus'); if (!envDb) return; st.classList.remove('err');
+  const saved = cuts.reduce((a, c) => a + c[1] - c[0], 0);
+  st.textContent = !S.cutOn ? 'Silence cutting is off. Captions still follow your speech.' : cuts.length ? `${cuts.length} pauses cut, ${saved.toFixed(1)} s removed. New length ${fmt(dur() - saved)}.` : 'No pauses long enough to cut.';
+}
+function updateCuts() { computeCuts(); if (S.chunks.length && S.autoTimed) spreadEvenly(); changed(); }
+function jumpTo(t) {
+  if (t >= dur() - 0.05) { video.pause(); video.dispatchEvent(new Event('ended')); return; }
+  jumping = true;
+  if (exporting && rec && rec.state === 'recording') try { rec.pause(); } catch (e) {}
+  const done = () => { video.removeEventListener('seeked', done); if (!jumping) return; jumping = false; if (exporting && rec && rec.state === 'paused') try { rec.resume(); } catch (e) {} };
+  video.addEventListener('seeked', done); video.currentTime = t; setTimeout(done, 800);
 }
 function wordTimes(c) {
   const w = words(c.text); const lens = w.map(x => x.length + 2); const L = lens.reduce((a, b) => a + b, 0);
@@ -329,7 +390,7 @@ function drawCaption(c, t, ci) {
   ctx.restore();
 }
 
-function drawQuote(g, t) {
+function drawQuote(g, t, fast) {
   const W = cv.width, H = cv.height, st = S.quoteStyle;
   const all = []; for (let i = g.a; i <= g.b; i++) { const c = S.chunks[i]; const tt = wordTimes(c); words(c.text).forEach((w, j) => all.push({ w, t: tt[j] })); }
   const gs = S.chunks[g.a].start, ge = S.chunks[g.b].end;
@@ -341,8 +402,9 @@ function drawQuote(g, t) {
   const lines = layout(ws, maxW, size * (st === 'slab' ? 0.24 : 0.3));
   const lh = size * (st === 'slab' ? 1.16 : st === 'statement' ? 1.2 : 1.32);
   const cy = S.quoteY * H, blockH = lines.length * lh, y0 = cy - blockH / 2;
-  const a = easeOut(clamp((t - gs) / 0.3, 0, 1)), out = clamp((ge - t) / 0.2, 0, 1);
-  ctx.save(); ctx.globalAlpha = Math.min(a, out); ctx.translate(0, (1 - a) * size * 0.45);
+  const a = easeOut(clamp((t - gs) / (fast ? 0.14 : 0.3), 0, 1)), out = fast ? 1 : clamp((ge - t) / 0.2, 0, 1);
+  ctx.save(); ctx.globalAlpha = Math.min(a, out); ctx.translate(0, (1 - a) * size * (fast ? 0.2 : 0.45));
+  if (fast) { const sc = 1 + 0.14 * (1 - a), tilt = S.rhythm ? (g.a % 2 ? 0.03 : -0.03) : 0; ctx.translate(W / 2, cy); ctx.scale(sc, sc); ctx.rotate(tilt); ctx.translate(-W / 2, -cy); }
   if (st === 'receipt') {
     const wMax = Math.max(...lines.map(l => l.width)), p = size * 0.8;
     const x = (W - wMax) / 2 - p, y = y0 - p * 0.8, w = wMax + p * 2, h = blockH + p * 1.6;
@@ -386,6 +448,7 @@ function render(t) {
   const i = activeIndex(t); lastLayer = 'cap';
   if (i < 0) return;
   if (S.chunks[i].q) { const g = groups().find(g => i >= g.a && i <= g.b); lastLayer = 'quote'; drawQuote(g, t); }
+  else if (S.allQuotes) { lastLayer = 'quote'; drawQuote({ a: i, b: i }, t, true); }
   else if (S.showCaps) drawCaption(S.chunks[i], t, i);
 }
 
@@ -394,6 +457,8 @@ let rowActive = -1;
 function renderTimeline() {
   const tl = $('#tl'); tl.querySelectorAll('.blk').forEach(b => b.remove());
   const D = dur(); if (!D) return;
+  if (S.cutOn) cuts.forEach(c => { const b = document.createElement('div'); b.className = 'blk cut'; b.style.left = (c[0] / D * 100) + '%'; b.style.width = ((c[1] - c[0]) / D * 100) + '%'; tl.insertBefore(b, $('#head')); });
+  cutStatus();
   S.chunks.forEach(c => { const b = document.createElement('div'); b.className = 'blk' + (c.q ? ' q' : ''); b.style.left = (c.start / D * 100) + '%'; b.style.width = Math.max(0.3, (c.end - c.start) / D * 100) + '%'; tl.insertBefore(b, $('#head')); });
 }
 function renderRows() {
@@ -428,7 +493,7 @@ function changed() { save(); renderTimeline(); renderRows(); renderQuotes(); upd
 function nudge(i, d) {
   const c = S.chunks[i], prev = S.chunks[i - 1];
   const min = prev ? prev.start + 0.1 : 0, max = c.end - 0.1;
-  c.start = clamp(c.start + d, min, max); if (prev) prev.end = c.start;
+  c.start = clamp(c.start + d, min, max); if (prev) prev.end = c.start; S.autoTimed = false;
   save(); renderTimeline(); const r = $(`.r[data-i="${i}"] .t`); if (r) r.textContent = fmt(c.start); renderQuotes();
   seek(c.start + 0.01);
 }
@@ -449,6 +514,7 @@ $('#play').onclick = () => play();
 function loop() {
   requestAnimationFrame(loop);
   const t = video.currentTime, D = dur();
+  if (S.cutOn && cuts.length && !video.paused && !jumping) { const c = cuts.find(c => t >= c[0] && t < c[1] - 0.03); if (c) jumpTo(c[1]); }
   render(t);
   $('#time').textContent = fmt(t) + ' / ' + fmt(D).replace(/\.\d$/, '');
   if (D) $('#head').style.left = (t / D * 100) + '%';
@@ -482,6 +548,7 @@ $('#file').addEventListener('change', e => {
   const f = e.target.files[0]; if (!f) return;
   if (video.src) URL.revokeObjectURL(video.src);
   video.src = URL.createObjectURL(f); video.load();
+  envDb = null; cuts = []; keeps = []; audioDur = 0; analyzeAudio(f);
 });
 video.addEventListener('loadedmetadata', () => {
   const vw = video.videoWidth || 1080, vh = video.videoHeight || 1920; const s = Math.min(1, 1920 / Math.max(vw, vh));
@@ -507,7 +574,7 @@ $('#wpc').addEventListener('input', e => { S.wpc = +e.target.value; $('#wpcOut')
 $('#make').onclick = () => {
   if (!S.script.trim()) { $('#makeStatus').textContent = 'Paste your script first.'; return; }
   S.chunks = makeChunks(S.script, S.wpc); spreadEvenly(); changed();
-  $('#makeStatus').textContent = `${S.chunks.length} caption lines made${hasVideo ? ' and spread over the video' : ''}. Next: sync them to your voice.`;
+  $('#makeStatus').textContent = `${S.chunks.length} caption lines made${hasVideo ? (keeps.length ? ' and placed over your speech' : ' and spread over the video') : ''}. Next: sync them to your voice.`;
   goTab('timing');
 };
 
@@ -532,7 +599,7 @@ $('#syncStart').onclick = () => {
 };
 function doTap() {
   if (syncI < 0 || syncI >= S.chunks.length) return;
-  const t = video.currentTime, c = S.chunks[syncI];
+  const t = video.currentTime, c = S.chunks[syncI]; S.autoTimed = false;
   c.start = t; c.end = Math.min(dur(), t + words(c.text).length * 0.45);
   if (syncI > 0) S.chunks[syncI - 1].end = t;
   syncI++; renderTimeline(); updateTap();
@@ -555,6 +622,9 @@ function syncSliders() {
   $('#cScale').value = S.capScale; $('#cScaleOut').textContent = pct(S.capScale);
   $('#qScale').value = S.quoteScale; $('#qScaleOut').textContent = pct(S.quoteScale);
   $('#showCaps').checked = S.showCaps;
+  $('#cutOn').checked = S.cutOn; $('#allQuotes').checked = S.allQuotes;
+  $('#sens').value = S.sens; $('#sensOut').textContent = S.sens < 0.25 ? 'cuts less' : S.sens > 0.45 ? 'cuts more' : 'balanced';
+  $('#minSil').value = S.minSil; $('#minSilOut').textContent = S.minSil.toFixed(2) + ' s';
   $('#rhythm').checked = S.rhythm; $('#zoomCuts').checked = S.zoomCuts;
   $('#beat').value = S.beat; $('#beatOut').textContent = S.beat.toFixed(1) + ' s';
   $$('#cStyles .chip').forEach(c => c.setAttribute('aria-pressed', c.dataset.c === S.capStyle));
@@ -564,6 +634,9 @@ function syncSliders() {
 ACCENTS.forEach(col => { const b = document.createElement('button'); b.className = 'sw'; b.style.background = col; b.dataset.col = col; b.setAttribute('aria-label', 'Highlight ' + col); b.onclick = () => { S.accent = col; save(); syncSliders(); }; $('#swatches').appendChild(b); });
 [['#cY', 'capY'], ['#qY', 'quoteY'], ['#cScale', 'capScale'], ['#qScale', 'quoteScale']].forEach(([id, k]) => $(id).addEventListener('input', e => { S[k] = +e.target.value; save(); syncSliders(); }));
 $('#showCaps').addEventListener('change', e => { S.showCaps = e.target.checked; save(); });
+$('#cutOn').addEventListener('change', e => { S.cutOn = e.target.checked; save(); updateCuts(); });
+$('#allQuotes').addEventListener('change', e => { S.allQuotes = e.target.checked; save(); });
+['sens', 'minSil'].forEach(k => $('#' + k).addEventListener('input', e => { S[k] = +e.target.value; save(); syncSliders(); updateCuts(); }));
 $('#rhythm').addEventListener('change', e => { S.rhythm = e.target.checked; save(); });
 $('#zoomCuts').addEventListener('change', e => { S.zoomCuts = e.target.checked; save(); });
 $('#beat').addEventListener('input', e => { S.beat = +e.target.value; save(); syncSliders(); });
@@ -622,12 +695,12 @@ $('#exp').onclick = async () => {
   const mime = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find(m => MediaRecorder.isTypeSupported(m));
   const stream = cv.captureStream(30);
   if (dest) dest.stream.getAudioTracks().forEach(tr => stream.addTrack(tr));
-  let rec; try { rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 8e6 } : { videoBitsPerSecond: 8e6 }); }
+  try { rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 8e6 } : { videoBitsPerSecond: 8e6 }); }
   catch (e) { st.classList.add('err'); st.textContent = 'Recording couldn’t start in this browser.'; return; }
   const parts = []; rec.ondataavailable = e => e.data && e.data.size && parts.push(e.data);
   exporting = true; $('#exp').disabled = true; $('#play').disabled = true; $('#saveAgain').hidden = true;
   st.textContent = 'Recording… keep this screen open.';
-  video.pause(); video.playbackRate = 1; video.currentTime = 0; await once(video, 'seeked', 1200);
+  video.pause(); video.playbackRate = 1; video.currentTime = (S.cutOn && keeps.length) ? keeps[0][0] : 0; await once(video, 'seeked', 1200);
   rec.start(500);
   try { await video.play(); } catch (e) {}
   await once(video, 'ended');
