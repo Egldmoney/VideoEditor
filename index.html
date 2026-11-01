@@ -1,0 +1,653 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Caption Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@500;700;800&family=Courier+Prime:wght@700&family=Fraunces:ital,wght@1,600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#ECEEF2;--panel:#FFFFFF;--panel2:#F3F4F7;--text:#1B1D22;--muted:#5E6370;--line:#D8DBE2;
+  --accent:#FFD84D;--ink:#1B1D22;--focus:#3B63D9;--danger:#C2412D;
+  color-scheme:light;
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#1F2126;--panel:#292C33;--panel2:#33363E;--text:#F1EFEA;--muted:#A4A8B3;--line:#3E424C;--focus:#8FA8FF;--danger:#FF8A75;color-scheme:dark;}}
+:root[data-theme="dark"]{--bg:#1F2126;--panel:#292C33;--panel2:#33363E;--text:#F1EFEA;--muted:#A4A8B3;--line:#3E424C;--focus:#8FA8FF;--danger:#FF8A75;color-scheme:dark;}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:500 15px/1.45 Archivo,"Helvetica Neue",Arial,sans-serif;-webkit-tap-highlight-color:transparent}
+button,input,textarea,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.app{max-width:1180px;margin:0 auto;padding:14px 14px 40px;display:grid;gap:14px}
+@media (min-width:900px){.app{grid-template-columns:minmax(0,1fr) 440px;align-items:start}.stagecol{position:sticky;top:14px}}
+header{display:flex;align-items:baseline;justify-content:space-between;gap:10px;grid-column:1/-1}
+h1{margin:0;font:800 22px/1.1 Archivo,sans-serif;letter-spacing:-.02em}
+h1 span{background:var(--accent);color:var(--ink);padding:0 6px;border-radius:4px}
+header p{margin:0;color:var(--muted);font-size:13px}
+.stage{position:relative;background:#000;border-radius:16px;overflow:hidden;display:flex;justify-content:center;align-items:center;min-height:300px}
+canvas{display:block;max-width:100%;max-height:64vh;width:auto;height:auto;touch-action:none;cursor:grab}
+.empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:#EDEDED;text-align:center;padding:20px;cursor:pointer;background:repeating-linear-gradient(135deg,#17181c 0 14px,#1c1d22 14px 28px)}
+.empty strong{font-size:20px}
+.empty small{color:#B9BCC5}
+#vid{position:absolute;width:2px;height:2px;opacity:0;pointer-events:none}
+.bar{display:flex;align-items:center;gap:10px;margin-top:10px}
+.time{font-variant-numeric:tabular-nums;color:var(--muted);font-size:13px;min-width:92px}
+.timeline{position:relative;height:34px;background:var(--panel);border:1px solid var(--line);border-radius:8px;margin-top:10px;overflow:hidden;touch-action:none;cursor:pointer}
+.blk{position:absolute;top:6px;bottom:6px;background:var(--panel2);border:1px solid var(--line);border-radius:4px}
+.blk.q{background:var(--accent);border-color:transparent;top:3px;bottom:3px}
+.head{position:absolute;top:0;bottom:0;width:2px;background:var(--danger);pointer-events:none}
+.hint{color:var(--muted);font-size:12.5px;margin:8px 2px 0}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.tabs{display:grid;grid-template-columns:repeat(5,1fr);border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel);z-index:2}
+.tabs button{border:0;background:none;padding:13px 2px;font-weight:700;font-size:13.5px;color:var(--muted);border-bottom:3px solid transparent;cursor:pointer}
+.tabs button[aria-selected="true"]{color:var(--text);border-bottom-color:var(--accent)}
+.pane{padding:16px;display:none}
+.pane.on{display:grid;gap:14px}
+h2{margin:0;font:800 17px/1.2 Archivo,sans-serif}
+.pane p{margin:0;color:var(--muted);font-size:13.5px}
+textarea{width:100%;min-height:210px;resize:vertical;border:1px solid var(--line);border-radius:10px;background:var(--panel2);padding:12px;line-height:1.5}
+.btn{border:0;border-radius:10px;padding:11px 16px;font-weight:700;cursor:pointer;background:var(--panel2);border:1px solid var(--line)}
+.btn.pri{background:var(--accent);color:var(--ink);border-color:transparent}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.sm{padding:7px 10px;font-size:13px}
+.row2{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.field{display:grid;gap:6px}
+.field label{font-weight:700;font-size:13.5px;display:flex;justify-content:space-between}
+.field label output{color:var(--muted);font-weight:500}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--panel2);border-radius:999px;padding:8px 14px;font-weight:700;font-size:13.5px;cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--text);color:var(--panel);border-color:var(--text)}
+.sw{width:34px;height:34px;border-radius:50%;border:2px solid var(--line);cursor:pointer}
+.sw[aria-pressed="true"]{outline:3px solid var(--text);outline-offset:2px}
+.tap{width:100%;min-height:132px;border:0;border-radius:18px;background:var(--accent);color:var(--ink);cursor:pointer;padding:16px;display:grid;gap:6px;align-content:center;text-align:center;touch-action:manipulation;user-select:none;-webkit-user-select:none}
+.tap:active{transform:scale(.985)}
+.tap small{font-weight:700;opacity:.7;font-size:12.5px}
+.tap b{font-size:20px;line-height:1.25}
+.tap .next{font-size:13px;opacity:.6}
+.tap:disabled{background:var(--panel2);color:var(--muted)}
+.rows{display:grid;gap:6px;max-height:440px;overflow:auto;padding-right:2px}
+.r{display:grid;grid-template-columns:58px 1fr auto;gap:6px;align-items:center;padding:6px;border-radius:10px;border:1px solid transparent}
+.r.on{border-color:var(--accent);background:var(--panel2)}
+.r .t{border:0;background:none;font-variant-numeric:tabular-nums;font-size:12.5px;color:var(--muted);cursor:pointer;text-align:left;padding:4px}
+.r input{border:1px solid var(--line);background:var(--panel2);border-radius:8px;padding:7px 9px;min-width:0;width:100%}
+.r .ctl{display:flex;gap:3px}
+.ic{width:30px;height:32px;border-radius:8px;border:1px solid var(--line);background:var(--panel);cursor:pointer;font-weight:800;padding:0}
+.ic.star[aria-pressed="true"]{background:var(--accent);color:var(--ink);border-color:transparent}
+.qlist{display:grid;gap:8px}
+.qi{display:flex;gap:10px;align-items:center;justify-content:space-between;background:var(--panel2);border-radius:10px;padding:10px 12px}
+.qi span{font-weight:700}
+.qi small{color:var(--muted);display:block;font-weight:500}
+.status{font-size:13.5px;color:var(--muted);min-height:1.2em}
+.status.err{color:var(--danger)}
+.prog{height:8px;background:var(--panel2);border-radius:99px;overflow:hidden}
+.prog i{display:block;height:100%;width:0;background:var(--accent)}
+.switch{display:flex;align-items:center;justify-content:space-between;gap:12px;font-weight:700}
+.switch input{width:22px;height:22px;accent-color:var(--accent)}
+.sep{height:1px;background:var(--line)}
+@media (prefers-reduced-motion:reduce){.tap:active{transform:none}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Caption <span>Studio</span></h1>
+    <p>Script in, captioned reel out</p>
+  </header>
+
+  <section class="stagecol">
+    <div class="stage" id="stage">
+      <canvas id="cv" width="1080" height="1920" aria-label="Video preview with captions"></canvas>
+      <label class="empty" id="empty" for="file">
+        <strong>Choose a video</strong>
+        <small>It stays on your device. Nothing is uploaded.</small>
+        <span class="btn pri">Open video</span>
+      </label>
+      <input type="file" id="file" accept="video/*" hidden>
+      <video id="vid" playsinline preload="auto"></video>
+    </div>
+    <div class="bar">
+      <button class="btn" id="play" disabled>Play</button>
+      <span class="time" id="time">0:00.0 / 0:00</span>
+      <label class="btn sm" for="file" style="margin-left:auto">Change video</label>
+    </div>
+    <div class="timeline" id="tl"><div class="head" id="head"></div></div>
+    <p class="hint">Drag a caption or quote on the video to move it. Tap the video to play or pause.</p>
+  </section>
+
+  <section class="panel">
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="script" aria-selected="true">Script</button>
+      <button role="tab" data-tab="timing" aria-selected="false">Timing</button>
+      <button role="tab" data-tab="quotes" aria-selected="false">Quotes</button>
+      <button role="tab" data-tab="style" aria-selected="false">Style</button>
+      <button role="tab" data-tab="export" aria-selected="false">Export</button>
+    </div>
+
+    <div class="pane on" data-pane="script">
+      <h2>Paste the script you read</h2>
+      <p>Use the exact words you say in the video. Each sentence gets cut into short caption lines.</p>
+      <textarea id="script" placeholder="Paste your script here…"></textarea>
+      <div class="field">
+        <label for="wpc">Words per caption <output id="wpcOut">4</output></label>
+        <input type="range" id="wpc" min="2" max="8" step="1" value="4">
+      </div>
+      <button class="btn pri" id="make">Make captions</button>
+      <div class="status" id="makeStatus"></div>
+    </div>
+
+    <div class="pane" data-pane="timing">
+      <h2>Sync to your voice</h2>
+      <p>Press start, then tap the big button the moment you begin saying each line. Space bar works too.</p>
+      <div class="row2">
+        <button class="btn pri" id="syncStart">Start tap sync</button>
+        <button class="btn" id="syncUndo" disabled>Undo tap</button>
+        <div class="chips" style="margin-left:auto">
+          <button class="chip" data-rate="1" aria-pressed="true">1×</button>
+          <button class="chip" data-rate="0.75" aria-pressed="false">0.75×</button>
+        </div>
+      </div>
+      <button class="tap" id="tap" disabled>
+        <small id="tapLabel">Make captions first</small>
+        <b id="tapNow">—</b>
+        <span class="next" id="tapNext"></span>
+      </button>
+      <div class="row2">
+        <button class="btn sm" id="spread">Spread evenly over the video</button>
+      </div>
+      <div class="sep"></div>
+      <h2>Fine-tune</h2>
+      <p>Tap a time to jump there. − and + move a line’s start by a tenth of a second. ★ turns it into a quote.</p>
+      <div class="rows" id="rows"></div>
+    </div>
+
+    <div class="pane" data-pane="quotes">
+      <h2>Quote moments</h2>
+      <p>Quotes appear big in the middle of the screen while you say them, and the small caption hides for that moment.</p>
+      <button class="btn pri" id="ai">Pick the strongest lines with Claude</button>
+      <div class="status" id="aiStatus"></div>
+      <div class="qlist" id="qlist"></div>
+      <div class="sep"></div>
+      <h2>Quote look</h2>
+      <div class="chips" id="qStyles">
+        <button class="chip" data-q="slab">Slab</button>
+        <button class="chip" data-q="statement">Statement</button>
+        <button class="chip" data-q="receipt">Receipt</button>
+      </div>
+      <div class="field">
+        <label for="qScale">Quote size <output id="qScaleOut">100%</output></label>
+        <input type="range" id="qScale" min="0.6" max="1.5" step="0.05" value="1">
+      </div>
+      <div class="field">
+        <label for="qY">Quote height on screen <output id="qYOut"></output></label>
+        <input type="range" id="qY" min="0.1" max="0.9" step="0.01" value="0.4">
+      </div>
+    </div>
+
+    <div class="pane" data-pane="style">
+      <h2>Rhythm</h2>
+      <p>A new visual hit every couple of seconds. The frame punches in like a jump cut on every beat, and each caption line switches look: normal, one key word huge, then an inverted tilted band.</p>
+      <label class="switch">Switch caption look every line <input type="checkbox" id="rhythm"></label>
+      <label class="switch">Zoom cut every beat <input type="checkbox" id="zoomCuts"></label>
+      <div class="field">
+        <label for="beat">Beat length <output id="beatOut">2.0 s</output></label>
+        <input type="range" id="beat" min="1" max="4" step="0.5" value="2">
+      </div>
+      <div class="sep"></div>
+      <label class="switch">Show captions <input type="checkbox" id="showCaps" checked></label>
+      <h2>Caption look</h2>
+      <div class="chips" id="cStyles">
+        <button class="chip" data-c="pop">Pop</button>
+        <button class="chip" data-c="clean">Clean</button>
+        <button class="chip" data-c="box">Box</button>
+      </div>
+      <p>Pop lights up each word as you say it. Clean is plain white. Box sits on a dark band.</p>
+      <div class="field">
+        <label>Highlight color</label>
+        <div class="chips" id="swatches"></div>
+      </div>
+      <div class="field">
+        <label for="cScale">Caption size <output id="cScaleOut">100%</output></label>
+        <input type="range" id="cScale" min="0.6" max="1.6" step="0.05" value="1">
+      </div>
+      <div class="field">
+        <label for="cY">Caption height on screen <output id="cYOut"></output></label>
+        <input type="range" id="cY" min="0.1" max="0.95" step="0.01" value="0.8">
+      </div>
+    </div>
+
+    <div class="pane" data-pane="export">
+      <h2>Export the captioned video</h2>
+      <p>The video plays through once while it records, so a 40-second reel takes about 40 seconds. Keep this screen open until it finishes.</p>
+      <button class="btn pri" id="exp" disabled>Export video</button>
+      <div class="prog"><i id="progBar"></i></div>
+      <div class="status" id="expStatus"></div>
+      <button class="btn" id="saveAgain" hidden>Save again</button>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
+const video = $('#vid'), cv = $('#cv'), ctx = cv.getContext('2d');
+const ACCENTS = ['#FFD84D', '#FF6B57', '#5BE3B0', '#7CB8FF', '#FFFFFF'];
+let S = { script:'', wpc:4, chunks:[], showCaps:true, capStyle:'pop', quoteStyle:'slab', accent:'#FFD84D', capY:0.8, quoteY:0.4, capScale:1, quoteScale:1, rhythm:true, zoomCuts:true, beat:2 };
+try { const saved = JSON.parse(localStorage.getItem('cs-state') || 'null'); if (saved) S = Object.assign(S, saved); } catch (e) {}
+let saveT; const save = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem('cs-state', JSON.stringify(S)); } catch (e) {} }, 300); };
+
+let hasVideo = false, exporting = false, syncI = -1, rate = 1;
+let actx, msrc, dest, sample = null, downloads = null, lastExport = null;
+
+/* ---------- text helpers ---------- */
+const words = t => t.trim().split(/\s+/).filter(Boolean);
+const easeOut = k => 1 - Math.pow(1 - k, 3);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const fmt = t => { t = Math.max(0, t || 0); const m = Math.floor(t / 60), s = (t % 60); return m + ':' + (s < 10 ? '0' : '') + s.toFixed(1); };
+const dur = () => (isFinite(video.duration) && video.duration > 0) ? video.duration : 0;
+
+function makeChunks(script, wpc) {
+  const sentences = script.replace(/([.!?…]+["”’)]?)\s+/g, '$1\n').split(/\n+/).map(s => s.trim()).filter(Boolean);
+  const out = [];
+  for (const s of sentences) {
+    const w = words(s); const n = Math.ceil(w.length / wpc); const size = Math.ceil(w.length / n);
+    for (let i = 0; i < w.length; i += size) out.push({ text: w.slice(i, i + size).join(' '), start: 0, end: 0, q: false, se: i + size >= w.length });
+  }
+  return out;
+}
+function spreadEvenly() {
+  const D = dur() || S.chunks.length * 1.6; const lead = 0.15, tail = 0.15;
+  const wts = S.chunks.map(c => words(c.text).length + (c.se ? 0.7 : 0));
+  const W = wts.reduce((a, b) => a + b, 0) || 1; let t = lead;
+  S.chunks.forEach((c, i) => { const d = (D - lead - tail) * wts[i] / W; c.start = t; c.end = t + d; t += d; });
+}
+function wordTimes(c) {
+  const w = words(c.text); const lens = w.map(x => x.length + 2); const L = lens.reduce((a, b) => a + b, 0);
+  let t = c.start; const d = Math.max(0.05, c.end - c.start);
+  return w.map((x, i) => { const s = t; t += d * lens[i] / L; return s; });
+}
+function groups() {
+  const g = []; let cur = null;
+  S.chunks.forEach((c, i) => { if (c.q) { if (cur && cur.b === i - 1) cur.b = i; else { cur = { a: i, b: i }; g.push(cur); } } });
+  return g;
+}
+function activeIndex(t) { for (let i = 0; i < S.chunks.length; i++) { const c = S.chunks[i]; if (t >= c.start && t < c.end) return i; } return -1; }
+
+/* ---------- canvas drawing ---------- */
+function layout(ws, maxW, space) {
+  const lines = []; let line = { words: [], width: 0 };
+  ws.forEach((w, i) => {
+    const wd = ctx.measureText(w).width; const add = line.words.length ? space + wd : wd;
+    if (line.words.length && line.width + add > maxW) { lines.push(line); line = { words: [], width: 0 }; }
+    const x = line.words.length ? line.width + space : 0;
+    line.words.push({ w, i, x, width: wd }); line.width = x + wd;
+  });
+  if (line.words.length) lines.push(line);
+  return lines;
+}
+function rr(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+
+const STOP = new Set('the a an and or but to of in on at for is are was were be been it its this that with as by from i you we they he she my your our me us so if not no do does did have has had just than then there here what when who how why all can will would im its dont thats'.split(' '));
+function keyWord(ws) { let k = -1, best = 0; ws.forEach((w, i) => { const s = w.toLowerCase().replace(/[^a-z0-9\u00C0-\u024F]/g, ''); if (!s || STOP.has(s)) return; if (s.length >= best) { best = s.length; k = i; } }); return k < 0 ? ws.length - 1 : k; }
+function drawCaption(c, t, ci) {
+  const W = cv.width, H = cv.height, v = S.rhythm ? ci % 3 : 0;
+  const st = v === 2 ? 'inv' : S.capStyle, base = W * 0.066 * S.capScale, sp = base * 0.28;
+  const font = s => `800 ${s}px Archivo, "Arial Black", sans-serif`;
+  const ws = words(c.text), times = wordTimes(c), key = v === 1 ? keyWord(ws) : -1;
+  const lines = []; let ln;
+  const newLine = () => { ln = { words: [], width: 0, size: 0 }; lines.push(ln); };
+  newLine();
+  ws.forEach((w, i) => {
+    let s = i === key ? base * 1.8 : base; ctx.font = font(s);
+    let wd = ctx.measureText(w).width;
+    if (wd > W * 0.9) { s = s * W * 0.9 / wd; ctx.font = font(s); wd = ctx.measureText(w).width; }
+    if (ln.words.length && (i === key || ln.width + sp + wd > W * 0.84 || ln.words.some(x => x.i === key))) newLine();
+    const x = ln.words.length ? ln.width + sp : 0;
+    ln.words.push({ w, i, x, width: wd, s }); ln.width = x + wd; ln.size = Math.max(ln.size, s);
+  });
+  const hs = lines.map(l => l.size * 1.16), total = hs.reduce((a, b) => a + b, 0);
+  const cy = S.capY * H; let y = cy - total / 2;
+  let active = -1; times.forEach((wt, j) => { if (t >= wt) active = j; });
+  const k = clamp((t - c.start) / 0.16, 0, 1); const sc = (st === 'pop' || S.rhythm) ? 1 + 0.14 * (1 - easeOut(k)) : 1;
+  ctx.save(); ctx.translate(W / 2, cy); ctx.scale(sc, sc); if (st === 'inv') ctx.rotate(-0.04); ctx.translate(-W / 2, -cy);
+  ctx.textBaseline = 'middle';
+  lines.forEach((l, li) => {
+    const lx = (W - l.width) / 2, my = y + hs[li] / 2;
+    if (st === 'box' || st === 'inv') { const p = l.size * 0.3; ctx.fillStyle = st === 'inv' ? S.accent : 'rgba(0,0,0,.66)'; rr(lx - p, my - hs[li] / 2 + 2, l.width + p * 2, hs[li] - 4, l.size * 0.2); ctx.fill(); }
+    l.words.forEach(wd => {
+      ctx.font = font(wd.s); const x = lx + wd.x;
+      if (st !== 'box' && st !== 'inv') { ctx.lineJoin = 'round'; ctx.lineWidth = wd.s * ((st === 'pop' || wd.i === key) ? 0.18 : 0.12); ctx.strokeStyle = 'rgba(0,0,0,.92)'; ctx.strokeText(wd.w, x, my); }
+      ctx.fillStyle = st === 'inv' ? '#141414' : (wd.i === key || (st === 'pop' && wd.i === active)) ? S.accent : '#FFFFFF';
+      ctx.fillText(wd.w, x, my);
+    });
+    y += hs[li];
+  });
+  ctx.restore();
+}
+
+function drawQuote(g, t) {
+  const W = cv.width, H = cv.height, st = S.quoteStyle;
+  const all = []; for (let i = g.a; i <= g.b; i++) { const c = S.chunks[i]; const tt = wordTimes(c); words(c.text).forEach((w, j) => all.push({ w, t: tt[j] })); }
+  const gs = S.chunks[g.a].start, ge = S.chunks[g.b].end;
+  const size = W * (st === 'slab' ? 0.105 : st === 'statement' ? 0.09 : 0.068) * S.quoteScale;
+  ctx.font = st === 'slab' ? `${size}px Anton, Impact, sans-serif` : st === 'statement' ? `italic 600 ${size}px Fraunces, Georgia, serif` : `700 ${size}px "Courier Prime", "Courier New", monospace`;
+  ctx.textBaseline = 'middle';
+  const ws = all.map(x => st === 'slab' ? x.w.toUpperCase() : x.w);
+  const maxW = W * (st === 'receipt' ? 0.66 : 0.84);
+  const lines = layout(ws, maxW, size * (st === 'slab' ? 0.24 : 0.3));
+  const lh = size * (st === 'slab' ? 1.16 : st === 'statement' ? 1.2 : 1.32);
+  const cy = S.quoteY * H, blockH = lines.length * lh, y0 = cy - blockH / 2;
+  const a = easeOut(clamp((t - gs) / 0.3, 0, 1)), out = clamp((ge - t) / 0.2, 0, 1);
+  ctx.save(); ctx.globalAlpha = Math.min(a, out); ctx.translate(0, (1 - a) * size * 0.45);
+  if (st === 'receipt') {
+    const wMax = Math.max(...lines.map(l => l.width)), p = size * 0.8;
+    const x = (W - wMax) / 2 - p, y = y0 - p * 0.8, w = wMax + p * 2, h = blockH + p * 1.6;
+    ctx.translate(W / 2, cy); ctx.rotate(-0.025); ctx.translate(-W / 2, -cy);
+    ctx.shadowColor = 'rgba(0,0,0,.35)'; ctx.shadowBlur = size * 0.6; ctx.shadowOffsetY = size * 0.15;
+    ctx.fillStyle = '#F7F5EF'; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + w, y);
+    const z = size * 0.28, n = Math.max(6, Math.round(w / (z * 2)));
+    ctx.lineTo(x + w, y + h); for (let i = n; i >= 0; i--) ctx.lineTo(x + i * w / n, y + h + (i % 2 ? z : 0)); ctx.lineTo(x, y); ctx.closePath(); ctx.fill();
+    ctx.shadowColor = 'transparent';
+    ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.setLineDash([size * 0.15, size * 0.12]); ctx.lineWidth = Math.max(1, size * 0.04);
+    ctx.beginPath(); ctx.moveTo(x + p * 0.5, y + p * 0.45); ctx.lineTo(x + w - p * 0.5, y + p * 0.45); ctx.stroke(); ctx.setLineDash([]);
+  }
+  if (st === 'statement') { ctx.fillStyle = S.accent; const rw = size * 1.6; ctx.fillRect((W - rw) / 2, y0 - size * 0.55, rw, Math.max(3, size * 0.09)); }
+  lines.forEach((ln, li) => {
+    const lx = (W - ln.width) / 2, y = y0 + lh * (li + 0.5);
+    if (st === 'slab') {
+      let right = -1; ln.words.forEach(wd => { if (t >= all[wd.i].t) right = wd.x + wd.width; });
+      if (right > 0) { const p = size * 0.22; ctx.fillStyle = S.accent; ctx.fillRect(lx - p, y - lh / 2 + size * 0.04, right + p * 2, lh - size * 0.08); }
+    }
+    ln.words.forEach(wd => {
+      const wt = all[wd.i].t; if (t < wt) return;
+      ctx.save(); ctx.globalAlpha *= clamp((t - wt) / 0.12, 0, 1);
+      if (st === 'statement') { ctx.shadowColor = 'rgba(0,0,0,.7)'; ctx.shadowBlur = size * 0.35; ctx.fillStyle = '#FFFFFF'; }
+      else ctx.fillStyle = st === 'slab' ? '#141414' : '#1E1E1E';
+      ctx.fillText(wd.w, lx + wd.x, y); ctx.restore();
+    });
+  });
+  ctx.restore();
+}
+
+let lastLayer = 'cap';
+const ZOOMS = [1, 1.15, 1.06, 1.22];
+function render(t) {
+  if (!hasVideo) return;
+  if (S.zoomCuts && video.videoWidth) {
+    const vw = video.videoWidth, vh = video.videoHeight, b = Math.floor(t / S.beat);
+    const kick = 1 + 0.04 * (1 - easeOut(clamp((t - b * S.beat) / 0.25, 0, 1)));
+    const z = ZOOMS[b % ZOOMS.length] * kick, sw = vw / z, sh = vh / z;
+    ctx.drawImage(video, (vw - sw) * (b % 2 ? 0.44 : 0.56), (vh - sh) * 0.38, sw, sh, 0, 0, cv.width, cv.height);
+  } else ctx.drawImage(video, 0, 0, cv.width, cv.height);
+  const i = activeIndex(t); lastLayer = 'cap';
+  if (i < 0) return;
+  if (S.chunks[i].q) { const g = groups().find(g => i >= g.a && i <= g.b); lastLayer = 'quote'; drawQuote(g, t); }
+  else if (S.showCaps) drawCaption(S.chunks[i], t, i);
+}
+
+/* ---------- UI: timeline, rows, quotes ---------- */
+let rowActive = -1;
+function renderTimeline() {
+  const tl = $('#tl'); tl.querySelectorAll('.blk').forEach(b => b.remove());
+  const D = dur(); if (!D) return;
+  S.chunks.forEach(c => { const b = document.createElement('div'); b.className = 'blk' + (c.q ? ' q' : ''); b.style.left = (c.start / D * 100) + '%'; b.style.width = Math.max(0.3, (c.end - c.start) / D * 100) + '%'; tl.insertBefore(b, $('#head')); });
+}
+function renderRows() {
+  const box = $('#rows'); box.innerHTML = '';
+  if (!S.chunks.length) { box.innerHTML = '<p>No captions yet. Paste your script in the Script tab and press Make captions.</p>'; return; }
+  S.chunks.forEach((c, i) => {
+    const r = document.createElement('div'); r.className = 'r'; r.dataset.i = i;
+    r.innerHTML = `<button class="t" title="Jump here">${fmt(c.start)}</button><input aria-label="Caption ${i + 1}"><div class="ctl"><button class="ic" data-n="-1" aria-label="Earlier">−</button><button class="ic" data-n="1" aria-label="Later">+</button><button class="ic star" aria-pressed="${c.q}" aria-label="Make quote">★</button></div>`;
+    const inp = r.querySelector('input'); inp.value = c.text;
+    inp.addEventListener('input', () => { c.text = inp.value; save(); renderQuotes(); });
+    r.querySelector('.t').onclick = () => seek(c.start + 0.01);
+    r.querySelectorAll('[data-n]').forEach(b => b.onclick = () => nudge(i, +b.dataset.n * 0.1));
+    r.querySelector('.star').onclick = () => { c.q = !c.q; changed(); };
+    box.appendChild(r);
+  });
+  rowActive = -1;
+}
+function renderQuotes() {
+  const box = $('#qlist'); box.innerHTML = ''; const gs = groups();
+  if (!gs.length) { box.innerHTML = '<p>No quotes yet. Let Claude pick them, or tap ★ next to a line in Timing.</p>'; return; }
+  gs.forEach(g => {
+    const txt = S.chunks.slice(g.a, g.b + 1).map(c => c.text).join(' ');
+    const el = document.createElement('div'); el.className = 'qi';
+    el.innerHTML = `<div><span></span><small>${fmt(S.chunks[g.a].start)} to ${fmt(S.chunks[g.b].end)}</small></div><div class="row2"><button class="btn sm" data-a="go">Play</button><button class="btn sm" data-a="rm">Remove</button></div>`;
+    el.querySelector('span').textContent = '“' + txt + '”';
+    el.querySelector('[data-a=go]').onclick = () => { seek(Math.max(0, S.chunks[g.a].start - 0.4)); play(true); };
+    el.querySelector('[data-a=rm]').onclick = () => { for (let i = g.a; i <= g.b; i++) S.chunks[i].q = false; changed(); };
+    box.appendChild(el);
+  });
+}
+function changed() { save(); renderTimeline(); renderRows(); renderQuotes(); updateTap(); }
+function nudge(i, d) {
+  const c = S.chunks[i], prev = S.chunks[i - 1];
+  const min = prev ? prev.start + 0.1 : 0, max = c.end - 0.1;
+  c.start = clamp(c.start + d, min, max); if (prev) prev.end = c.start;
+  save(); renderTimeline(); const r = $(`.r[data-i="${i}"] .t`); if (r) r.textContent = fmt(c.start); renderQuotes();
+  seek(c.start + 0.01);
+}
+
+/* ---------- playback ---------- */
+function ensureAudio() {
+  try {
+    if (!actx) { actx = new (window.AudioContext || window.webkitAudioContext)(); msrc = actx.createMediaElementSource(video); dest = actx.createMediaStreamDestination(); msrc.connect(actx.destination); msrc.connect(dest); }
+    if (actx.state === 'suspended') actx.resume();
+  } catch (e) {}
+}
+function seek(t) { if (!hasVideo) return; video.currentTime = clamp(t, 0, dur()); }
+function play(force) { if (!hasVideo || exporting) return; ensureAudio(); if (force || video.paused) video.play(); else video.pause(); }
+video.addEventListener('play', () => $('#play').textContent = 'Pause');
+video.addEventListener('pause', () => $('#play').textContent = 'Play');
+$('#play').onclick = () => play();
+
+function loop() {
+  requestAnimationFrame(loop);
+  const t = video.currentTime, D = dur();
+  render(t);
+  $('#time').textContent = fmt(t) + ' / ' + fmt(D).replace(/\.\d$/, '');
+  if (D) $('#head').style.left = (t / D * 100) + '%';
+  const i = activeIndex(t);
+  if (i !== rowActive) { $$('.r.on').forEach(r => r.classList.remove('on')); const r = $(`.r[data-i="${i}"]`); if (r) r.classList.add('on'); rowActive = i; }
+  if (exporting && D) $('#progBar').style.width = (t / D * 100) + '%';
+}
+requestAnimationFrame(loop);
+
+/* timeline scrub */
+const tl = $('#tl'); let scrubbing = false;
+const scrub = e => { const r = tl.getBoundingClientRect(); seek((e.clientX - r.left) / r.width * dur()); };
+tl.addEventListener('pointerdown', e => { if (exporting) return; scrubbing = true; tl.setPointerCapture(e.pointerId); scrub(e); });
+tl.addEventListener('pointermove', e => scrubbing && scrub(e));
+tl.addEventListener('pointerup', () => scrubbing = false);
+
+/* drag on canvas */
+let drag = null;
+cv.addEventListener('pointerdown', e => { if (!hasVideo || exporting) return; cv.setPointerCapture(e.pointerId); drag = { y0: e.clientY, x0: e.clientX, moved: false, layer: lastLayer }; });
+cv.addEventListener('pointermove', e => {
+  if (!drag) return;
+  if (Math.abs(e.clientY - drag.y0) + Math.abs(e.clientX - drag.x0) > 6) drag.moved = true;
+  if (!drag.moved) return;
+  const r = cv.getBoundingClientRect(); const y = clamp((e.clientY - r.top) / r.height, 0.08, 0.95);
+  if (drag.layer === 'quote') S.quoteY = y; else S.capY = y; syncSliders();
+});
+cv.addEventListener('pointerup', () => { if (drag && !drag.moved) play(); else save(); drag = null; });
+
+/* file load */
+$('#file').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  if (video.src) URL.revokeObjectURL(video.src);
+  video.src = URL.createObjectURL(f); video.load();
+});
+video.addEventListener('loadedmetadata', () => {
+  const vw = video.videoWidth || 1080, vh = video.videoHeight || 1920; const s = Math.min(1, 1920 / Math.max(vw, vh));
+  cv.width = Math.round(vw * s / 2) * 2; cv.height = Math.round(vh * s / 2) * 2;
+  hasVideo = true; $('#empty').hidden = true; $('#play').disabled = false; $('#exp').disabled = false;
+  if (S.chunks.length && S.chunks.every(c => c.end === 0)) spreadEvenly();
+  video.currentTime = 0.05; changed();
+});
+video.addEventListener('error', () => { $('#empty').hidden = false; $('#empty').querySelector('small').textContent = 'This video format can’t be played here. Try an MP4.'; });
+
+/* ---------- tabs ---------- */
+$$('.tabs button').forEach(b => b.onclick = () => {
+  $$('.tabs button').forEach(x => x.setAttribute('aria-selected', x === b));
+  $$('.pane').forEach(p => p.classList.toggle('on', p.dataset.pane === b.dataset.tab));
+});
+const goTab = name => $(`.tabs button[data-tab="${name}"]`).click();
+
+/* ---------- script ---------- */
+$('#script').value = S.script;
+$('#wpc').value = S.wpc; $('#wpcOut').textContent = S.wpc;
+$('#script').addEventListener('input', e => { S.script = e.target.value; save(); });
+$('#wpc').addEventListener('input', e => { S.wpc = +e.target.value; $('#wpcOut').textContent = S.wpc; save(); });
+$('#make').onclick = () => {
+  if (!S.script.trim()) { $('#makeStatus').textContent = 'Paste your script first.'; return; }
+  S.chunks = makeChunks(S.script, S.wpc); spreadEvenly(); changed();
+  $('#makeStatus').textContent = `${S.chunks.length} caption lines made${hasVideo ? ' and spread over the video' : ''}. Next: sync them to your voice.`;
+  goTab('timing');
+};
+
+/* ---------- tap sync ---------- */
+function updateTap() {
+  const n = S.chunks.length, tap = $('#tap');
+  if (!n) { tap.disabled = true; $('#tapLabel').textContent = 'Make captions first'; $('#tapNow').textContent = '—'; $('#tapNext').textContent = ''; return; }
+  if (syncI < 0) { tap.disabled = true; $('#tapLabel').textContent = hasVideo ? 'Press Start tap sync' : 'Open a video first'; $('#tapNow').textContent = S.chunks[0].text; $('#tapNext').textContent = ''; }
+  else { tap.disabled = false; $('#tapLabel').textContent = `Tap when you start saying line ${syncI + 1} of ${n}`; $('#tapNow').textContent = S.chunks[syncI].text; $('#tapNext').textContent = S.chunks[syncI + 1] ? 'Then: ' + S.chunks[syncI + 1].text : 'Last line'; }
+  $('#syncUndo').disabled = syncI <= 0;
+  $('#syncStart').textContent = syncI >= 0 ? 'Stop sync' : 'Start tap sync';
+}
+function finishSync() {
+  if (syncI > 0) { const last = S.chunks[syncI - 1]; last.end = Math.max(last.start + 0.3, Math.min(dur(), last.start + words(last.text).length * 0.45)); }
+  if (syncI >= S.chunks.length) { const last = S.chunks[S.chunks.length - 1]; last.end = Math.min(dur(), Math.max(last.end, last.start + words(last.text).length * 0.45)); }
+  syncI = -1; video.pause(); video.playbackRate = 1; changed();
+}
+$('#syncStart').onclick = () => {
+  if (syncI >= 0) { finishSync(); return; }
+  if (!hasVideo || !S.chunks.length) return;
+  syncI = 0; video.playbackRate = rate; seek(0); ensureAudio(); video.play(); updateTap(); $('#tap').focus();
+};
+function doTap() {
+  if (syncI < 0 || syncI >= S.chunks.length) return;
+  const t = video.currentTime, c = S.chunks[syncI];
+  c.start = t; c.end = Math.min(dur(), t + words(c.text).length * 0.45);
+  if (syncI > 0) S.chunks[syncI - 1].end = t;
+  syncI++; renderTimeline(); updateTap();
+  if (syncI >= S.chunks.length) finishSync();
+}
+$('#tap').addEventListener('pointerdown', e => { e.preventDefault(); doTap(); });
+$('#tap').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doTap(); } });
+document.addEventListener('keydown', e => { if (e.code === 'Space' && syncI >= 0 && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) { e.preventDefault(); doTap(); } });
+$('#syncUndo').onclick = () => { if (syncI <= 0) return; syncI--; seek(Math.max(0, S.chunks[syncI].start - 1.2)); if (video.paused) video.play(); updateTap(); };
+video.addEventListener('ended', () => { if (syncI >= 0) finishSync(); });
+$$('[data-rate]').forEach(b => b.onclick = () => { rate = +b.dataset.rate; $$('[data-rate]').forEach(x => x.setAttribute('aria-pressed', x === b)); if (syncI >= 0) video.playbackRate = rate; });
+$('#spread').onclick = () => { if (!S.chunks.length) return; spreadEvenly(); changed(); };
+
+/* ---------- style controls ---------- */
+const pct = v => Math.round(v * 100) + '%';
+const posLabel = v => v < 0.33 ? 'top' : v < 0.66 ? 'middle' : 'bottom';
+function syncSliders() {
+  $('#cY').value = S.capY; $('#cYOut').textContent = posLabel(S.capY);
+  $('#qY').value = S.quoteY; $('#qYOut').textContent = posLabel(S.quoteY);
+  $('#cScale').value = S.capScale; $('#cScaleOut').textContent = pct(S.capScale);
+  $('#qScale').value = S.quoteScale; $('#qScaleOut').textContent = pct(S.quoteScale);
+  $('#showCaps').checked = S.showCaps;
+  $('#rhythm').checked = S.rhythm; $('#zoomCuts').checked = S.zoomCuts;
+  $('#beat').value = S.beat; $('#beatOut').textContent = S.beat.toFixed(1) + ' s';
+  $$('#cStyles .chip').forEach(c => c.setAttribute('aria-pressed', c.dataset.c === S.capStyle));
+  $$('#qStyles .chip').forEach(c => c.setAttribute('aria-pressed', c.dataset.q === S.quoteStyle));
+  $$('#swatches .sw').forEach(c => c.setAttribute('aria-pressed', c.dataset.col === S.accent));
+}
+ACCENTS.forEach(col => { const b = document.createElement('button'); b.className = 'sw'; b.style.background = col; b.dataset.col = col; b.setAttribute('aria-label', 'Highlight ' + col); b.onclick = () => { S.accent = col; save(); syncSliders(); }; $('#swatches').appendChild(b); });
+[['#cY', 'capY'], ['#qY', 'quoteY'], ['#cScale', 'capScale'], ['#qScale', 'quoteScale']].forEach(([id, k]) => $(id).addEventListener('input', e => { S[k] = +e.target.value; save(); syncSliders(); }));
+$('#showCaps').addEventListener('change', e => { S.showCaps = e.target.checked; save(); });
+$('#rhythm').addEventListener('change', e => { S.rhythm = e.target.checked; save(); });
+$('#zoomCuts').addEventListener('change', e => { S.zoomCuts = e.target.checked; save(); });
+$('#beat').addEventListener('input', e => { S.beat = +e.target.value; save(); syncSliders(); });
+$$('#cStyles .chip').forEach(c => c.onclick = () => { S.capStyle = c.dataset.c; save(); syncSliders(); });
+$$('#qStyles .chip').forEach(c => c.onclick = () => { S.quoteStyle = c.dataset.q; save(); syncSliders(); });
+
+/* ---------- Claude picks quotes ---------- */
+$('#ai').onclick = async () => {
+  const st = $('#aiStatus'); st.classList.remove('err');
+  if (!S.chunks.length) { st.textContent = 'Make captions from your script first.'; return; }
+  if (!sample) { st.textContent = 'Claude isn’t available in this view. Tap ★ next to lines in Timing instead.'; return; }
+  $('#ai').disabled = true; st.textContent = 'Claude is reading your script…';
+  const list = S.chunks.map((c, i) => i + ': ' + c.text).join('\n');
+  const prompt = `You pick on-screen quote moments for a short talking-head video (Reels/TikTok). Below is the script split into numbered caption chunks, in spoken order.
+Choose the 3 to 5 strongest lines: the hook near the start, the turning point, and the closing line. Each pick is a range of consecutive chunks that together form one complete, punchy statement of at most 12 words. Prefer lines that would make someone stop scrolling. Never paraphrase; only choose ranges. Ranges must not overlap.
+Return only JSON, nothing else: {"quotes":[[firstIndex,lastIndex], ...]}
+
+Chunks:
+${list}`;
+  try {
+    const res = await sample.json(prompt, { modelTier: 'default' });
+    const qs = (res && Array.isArray(res.quotes)) ? res.quotes : [];
+    let n = 0; S.chunks.forEach(c => c.q = false);
+    qs.forEach(r => { const a = clamp(+r[0] | 0, 0, S.chunks.length - 1), b = clamp(+r[1] | 0, a, Math.min(S.chunks.length - 1, a + 4)); for (let i = a; i <= b; i++) S.chunks[i].q = true; n++; });
+    changed(); st.textContent = n ? `${n} quotes picked. Play them below, remove any that don’t land.` : 'Claude didn’t find clear quote lines. Tap ★ in Timing to choose your own.';
+  } catch (e) {
+    st.classList.add('err');
+    st.textContent = e && e.code === 'not_granted' ? 'Claude wasn’t allowed. Tap ★ next to lines in Timing to choose quotes yourself.' : e && e.code === 'rate_limited' ? 'Too many requests right now. Try again in a minute.' : 'Couldn’t pick quotes. Try again, or tap ★ in Timing.';
+  } finally { $('#ai').disabled = false; }
+};
+
+/* ---------- export ---------- */
+const once = (el, ev, ms) => new Promise(res => { let t; const f = () => { clearTimeout(t); el.removeEventListener(ev, f); res(); }; el.addEventListener(ev, f); if (ms) t = setTimeout(f, ms); });
+async function offerSave() {
+  const st = $('#expStatus'); if (!lastExport) return;
+  if (!downloads) {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(lastExport.blob);
+    a.download = 'captioned-reel-' + new Date().toISOString().slice(0, 10) + '.' + lastExport.ext;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    st.textContent = 'Downloaded.'; $('#saveAgain').hidden = false; return;
+  }
+  try {
+    await downloads.save({ filename: 'captioned-reel-' + new Date().toISOString().slice(0, 10) + '.' + lastExport.ext, data: lastExport.blob });
+    st.textContent = 'Saved.';
+  } catch (e) {
+    st.textContent = e && e.code === 'declined' ? 'Save cancelled. Tap Save again when you’re ready.' : e && e.code === 'rate_limited' ? 'A save is already open. Wait a moment, then tap Save again.' : 'Couldn’t save the file here.';
+  }
+  $('#saveAgain').hidden = false;
+}
+$('#saveAgain').onclick = offerSave;
+$('#exp').onclick = async () => {
+  const st = $('#expStatus'); st.classList.remove('err');
+  if (!cv.captureStream || !window.MediaRecorder) { st.classList.add('err'); st.textContent = 'This browser can’t record video. Try Chrome, or update Safari.'; return; }
+  if (syncI >= 0) finishSync();
+  ensureAudio();
+  const mime = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find(m => MediaRecorder.isTypeSupported(m));
+  const stream = cv.captureStream(30);
+  if (dest) dest.stream.getAudioTracks().forEach(tr => stream.addTrack(tr));
+  let rec; try { rec = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: 8e6 } : { videoBitsPerSecond: 8e6 }); }
+  catch (e) { st.classList.add('err'); st.textContent = 'Recording couldn’t start in this browser.'; return; }
+  const parts = []; rec.ondataavailable = e => e.data && e.data.size && parts.push(e.data);
+  exporting = true; $('#exp').disabled = true; $('#play').disabled = true; $('#saveAgain').hidden = true;
+  st.textContent = 'Recording… keep this screen open.';
+  video.pause(); video.playbackRate = 1; video.currentTime = 0; await once(video, 'seeked', 1200);
+  rec.start(500);
+  try { await video.play(); } catch (e) {}
+  await once(video, 'ended');
+  rec.stop(); await once(rec, 'stop', 3000);
+  exporting = false; $('#exp').disabled = false; $('#play').disabled = false; $('#progBar').style.width = '100%';
+  const type = rec.mimeType || mime || 'video/webm';
+  lastExport = { blob: new Blob(parts, { type }), ext: type.includes('mp4') ? 'mp4' : 'webm' };
+  st.textContent = `Done. ${(lastExport.blob.size / 1048576).toFixed(1)} MB ${lastExport.ext.toUpperCase()}.`;
+  offerSave();
+};
+
+/* ---------- init ---------- */
+syncSliders(); renderRows(); renderQuotes(); updateTap();
+if (document.fonts) ['800 40px Archivo', '40px Anton', 'italic 600 40px Fraunces', '700 40px "Courier Prime"'].forEach(f => document.fonts.load(f).catch(() => {}));
+if (!(window.claude && claude.use)) { $('#ai').textContent = 'Pick quotes with ★ in Timing'; $('#ai').disabled = true; }
+if (window.claude && claude.use) {
+  claude.use('sample').then(s => { sample = s; if (!s) $('#ai').textContent = 'Pick quotes with ★ in Timing'; });
+  claude.use('downloads').then(d => { downloads = d; });
+}
+})();
+</script>
+</body>
+</html>
