@@ -6,7 +6,7 @@
 <title>Caption Studio</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@500;700;800&family=Courier+Prime:wght@700&family=Fraunces:ital,wght@1,600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Instrument+Serif&family=Archivo:wght@500;700;800&family=Courier+Prime:wght@700&family=Fraunces:ital,wght@1,600&display=swap" rel="stylesheet">
 <style>
 :root{
   --bg:#ECEEF2;--panel:#FFFFFF;--panel2:#F3F4F7;--text:#1B1D22;--muted:#5E6370;--line:#D8DBE2;
@@ -39,6 +39,7 @@ canvas{display:block;max-width:100%;max-height:64vh;width:auto;height:auto;touch
 .timeline{position:relative;height:34px;background:var(--panel);border:1px solid var(--line);border-radius:8px;margin-top:10px;overflow:hidden;touch-action:none;cursor:pointer}
 .blk{position:absolute;top:6px;bottom:6px;background:var(--panel2);border:1px solid var(--line);border-radius:4px}
 .blk.cut{top:0;bottom:0;border:0;border-radius:0;background:repeating-linear-gradient(135deg,rgba(194,65,45,.4) 0 4px,transparent 4px 8px)}
+.blk.h{top:0;bottom:auto;height:6px;border:0;border-radius:0 0 3px 3px;background:var(--accent);z-index:1}
 .blk.q{background:var(--accent);border-color:transparent;top:3px;bottom:3px}
 .head{position:absolute;top:0;bottom:0;width:2px;background:var(--danger);pointer-events:none}
 .hint{color:var(--muted);font-size:12.5px;margin:8px 2px 0}
@@ -182,11 +183,12 @@ input[type=range]{width:100%;accent-color:var(--accent)}
     </div>
 
     <div class="pane" data-pane="quotes">
-      <h2>Quote moments</h2>
-      <p>Quotes appear big in the middle of the screen while you say them, and the small caption hides for that moment.</p>
-      <label class="switch">Every line as a big quote <input type="checkbox" id="allQuotes"></label>
-      <button class="btn pri" id="ai">Pick the strongest lines with Claude</button>
+      <h2>Quote cards</h2>
+      <p>One quote per line. Each card pops in big at the moment you say it and stays a few seconds, while the one-word captions keep running underneath. Colors rotate per card.</p>
+      <textarea id="heads" style="min-height:150px" placeholder="Scrolling isn’t resting. You stand up feeling worse than you sat down."></textarea>
+      <button class="btn pri" id="ai">Write the quote cards with Claude</button>
       <div class="status" id="aiStatus"></div>
+      <label class="switch">Every line as a big quote <input type="checkbox" id="allQuotes"></label>
       <div class="qlist" id="qlist"></div>
       <div class="sep"></div>
       <h2>Quote look</h2>
@@ -218,11 +220,12 @@ input[type=range]{width:100%;accent-color:var(--accent)}
       <label class="switch">Show captions <input type="checkbox" id="showCaps" checked></label>
       <h2>Caption look</h2>
       <div class="chips" id="cStyles">
+        <button class="chip" data-c="word">One word</button>
         <button class="chip" data-c="pop">Pop</button>
         <button class="chip" data-c="clean">Clean</button>
         <button class="chip" data-c="box">Box</button>
       </div>
-      <p>Pop lights up each word as you say it. Clean is plain white. Box sits on a dark band.</p>
+      <p>One word shows each word alone as you say it, like Edits. Pop lights up each word in a line. Clean is plain white. Box sits on a dark band.</p>
       <div class="field">
         <label>Highlight color</label>
         <div class="chips" id="swatches"></div>
@@ -253,8 +256,10 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const video = $('#vid'), cv = $('#cv'), ctx = cv.getContext('2d');
 const ACCENTS = ['#FFD84D', '#FF6B57', '#5BE3B0', '#7CB8FF', '#FFFFFF'];
-let S = { script:'', wpc:4, chunks:[], showCaps:true, capStyle:'pop', quoteStyle:'slab', accent:'#FFD84D', capY:0.8, quoteY:0.4, capScale:1, quoteScale:1, rhythm:true, zoomCuts:true, beat:2, cutOn:true, sens:0.35, minSil:0.45, allQuotes:true, autoTimed:false };
+let S = { script:'', wpc:4, chunks:[], showCaps:true, capStyle:'word', quoteStyle:'slab', accent:'#FFD84D', capY:0.68, quoteY:0.3, capScale:1, quoteScale:1, rhythm:true, zoomCuts:true, beat:2, cutOn:true, sens:0.35, minSil:0.45, allQuotes:false, autoTimed:false, headlines:'' };
 try { const saved = JSON.parse(localStorage.getItem('cs-state') || 'null'); if (saved) S = Object.assign(S, saved); } catch (e) {}
+if (!S.v2) { S.capStyle = 'word'; S.allQuotes = false; S.quoteY = 0.3; S.capY = 0.68; S.v2 = true; }
+let HEADS = [];
 let saveT; const save = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem('cs-state', JSON.stringify(S)); } catch (e) {} }, 300); };
 
 let hasVideo = false, exporting = false, syncI = -1, rate = 1;
@@ -357,6 +362,15 @@ function rr(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x 
 const STOP = new Set('the a an and or but to of in on at for is are was were be been it its this that with as by from i you we they he she my your our me us so if not no do does did have has had just than then there here what when who how why all can will would im its dont thats'.split(' '));
 function keyWord(ws) { let k = -1, best = 0; ws.forEach((w, i) => { const s = w.toLowerCase().replace(/[^a-z0-9\u00C0-\u024F]/g, ''); if (!s || STOP.has(s)) return; if (s.length >= best) { best = s.length; k = i; } }); return k < 0 ? ws.length - 1 : k; }
 function drawCaption(c, t, ci) {
+  if (S.capStyle === 'word') {
+    const W = cv.width, H = cv.height, ws = words(c.text), times = wordTimes(c);
+    let j = 0; times.forEach((wt, k) => { if (t >= wt) j = k; });
+    const size = W * 0.08 * S.capScale, k = clamp((t - times[j]) / 0.12, 0, 1), sc = 1 + 0.12 * (1 - easeOut(k));
+    ctx.save(); ctx.translate(W / 2, S.capY * H); ctx.scale(sc, sc);
+    ctx.font = `400 ${size}px "Instrument Serif", "DM Serif Display", Georgia, serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,.75)'; ctx.shadowBlur = size * 0.25; ctx.shadowOffsetY = size * 0.04;
+    ctx.fillStyle = '#FFFFFF'; ctx.fillText(ws[j] || '', 0, 0); ctx.restore(); return;
+  }
   const W = cv.width, H = cv.height, v = S.rhythm ? ci % 3 : 0;
   const st = v === 2 ? 'inv' : S.capStyle, base = W * 0.066 * S.capScale, sp = base * 0.28;
   const font = s => `800 ${s}px Archivo, "Arial Black", sans-serif`;
@@ -437,6 +451,45 @@ function drawQuote(g, t, fast) {
   ctx.restore();
 }
 
+/* ---------- quote cards (Edits style) ---------- */
+const norm = w => w.toLowerCase().replace(/[^a-z0-9\u00C0-\u024F]/g, '');
+function computeHeads() {
+  HEADS = []; const D = dur();
+  const lines = (S.headlines || '').split('\n').map(s => s.trim()).filter(Boolean);
+  if (!lines.length || !D) return;
+  const key = s => words(s).map(norm).filter(w => w && !STOP.has(w));
+  const cw = S.chunks.map(c => new Set(key(c.text)));
+  const res = lines.map(text => {
+    const qw = key(text); let best = -1, bs = 0;
+    S.chunks.forEach((c, i) => {
+      const win = new Set(); for (let j = i; j < Math.min(S.chunks.length, i + 4); j++) cw[j].forEach(w => win.add(w));
+      const sc = qw.filter(w => win.has(w)).length / (qw.length || 1) + (qw.some(w => cw[i].has(w)) ? 0.05 : 0);
+      if (sc > bs + 1e-6) { bs = sc; best = i; }
+    });
+    return { text, start: (bs >= 0.4 && best >= 0) ? S.chunks[best].start : null };
+  });
+  res.forEach((r, k) => { if (r.start == null) r.start = D * (k + 0.5) / res.length - 2; r.start = clamp(r.start, 0, Math.max(0, D - 1)); });
+  res.sort((a, b) => a.start - b.start);
+  res.forEach((r, k) => { const len = clamp(words(r.text).length * 0.45 + 1.5, 4, 9), next = res[k + 1] ? res[k + 1].start - 0.3 : D; r.end = Math.max(r.start + 1.5, Math.min(r.start + len, next)); r.idx = k; });
+  HEADS = res;
+}
+const HEAD_COLORS = [['#FFE14D', '#2B2300'], ['#FFB25E', '#3A1800'], ['#FF3B2E', '#140000'], ['#FFFFFF', '#1B1D22']];
+function drawHead(h, t) {
+  const W = cv.width, H = cv.height, n = h.idx % HEAD_COLORS.length, [fill, shade] = HEAD_COLORS[n];
+  const size = W * 0.092 * S.quoteScale;
+  ctx.font = `${n === 2 ? 'italic ' : ''}${size}px Anton, Impact, "Arial Black", sans-serif`; ctx.textBaseline = 'middle';
+  const lines = layout(words(h.text.toUpperCase()), W * 0.78, size * 0.22), lh = size * 1.06;
+  const x0 = W * 0.08, y0 = S.quoteY * H - lines.length * lh / 2, depth = size * 0.1, out = clamp((h.end - t) / 0.2, 0, 1);
+  lines.forEach((ln, li) => {
+    const a = easeOut(clamp((t - h.start - li * 0.07) / 0.22, 0, 1)); if (a <= 0) return;
+    const x = x0 - (1 - a) * size * 0.8, y = y0 + lh * (li + 0.5), txt = ln.words.map(w => w.w).join(' ');
+    ctx.save(); ctx.globalAlpha = a * out;
+    ctx.fillStyle = shade; for (let d = depth; d > 0; d -= Math.max(1, depth / 8)) ctx.fillText(txt, x + d * 0.55, y + d);
+    ctx.lineJoin = 'round'; ctx.lineWidth = size * 0.06; ctx.strokeStyle = shade; ctx.strokeText(txt, x, y);
+    ctx.fillStyle = fill; ctx.fillText(txt, x, y); ctx.restore();
+  });
+}
+
 let lastLayer = 'cap';
 const ZOOMS = [1, 1.15, 1.06, 1.22];
 function render(t) {
@@ -448,10 +501,13 @@ function render(t) {
     ctx.drawImage(video, (vw - sw) * (b % 2 ? 0.44 : 0.56), (vh - sh) * 0.38, sw, sh, 0, 0, cv.width, cv.height);
   } else ctx.drawImage(video, 0, 0, cv.width, cv.height);
   const i = activeIndex(t); lastLayer = 'cap';
-  if (i < 0) return;
-  if (S.chunks[i].q) { const g = groups().find(g => i >= g.a && i <= g.b); lastLayer = 'quote'; drawQuote(g, t); }
-  else if (S.allQuotes) { lastLayer = 'quote'; drawQuote({ a: i, b: i }, t, true); }
-  else if (S.showCaps) drawCaption(S.chunks[i], t, i);
+  if (i >= 0) {
+    if (S.chunks[i].q) { const g = groups().find(g => i >= g.a && i <= g.b); lastLayer = 'quote'; drawQuote(g, t); }
+    else if (S.allQuotes) { lastLayer = 'quote'; drawQuote({ a: i, b: i }, t, true); }
+    else if (S.showCaps) drawCaption(S.chunks[i], t, i);
+  }
+  const hd = HEADS.find(h => t >= h.start && t < h.end);
+  if (hd) { lastLayer = 'quote'; drawHead(hd, t); }
 }
 
 /* ---------- UI: timeline, rows, quotes ---------- */
@@ -461,6 +517,7 @@ function renderTimeline() {
   const D = dur(); if (!D) return;
   if (S.cutOn) cuts.forEach(c => { const b = document.createElement('div'); b.className = 'blk cut'; b.style.left = (c[0] / D * 100) + '%'; b.style.width = ((c[1] - c[0]) / D * 100) + '%'; tl.insertBefore(b, $('#head')); });
   cutStatus();
+  HEADS.forEach(hh => { const b = document.createElement('div'); b.className = 'blk h'; b.style.left = (hh.start / D * 100) + '%'; b.style.width = ((hh.end - hh.start) / D * 100) + '%'; tl.insertBefore(b, $('#head')); });
   S.chunks.forEach(c => { const b = document.createElement('div'); b.className = 'blk' + (c.q ? ' q' : ''); b.style.left = (c.start / D * 100) + '%'; b.style.width = Math.max(0.3, (c.end - c.start) / D * 100) + '%'; tl.insertBefore(b, $('#head')); });
 }
 function renderRows() {
@@ -491,7 +548,7 @@ function renderQuotes() {
     box.appendChild(el);
   });
 }
-function changed() { save(); renderTimeline(); renderRows(); renderQuotes(); updateTap(); }
+function changed() { computeHeads(); save(); renderTimeline(); renderRows(); renderQuotes(); updateTap(); }
 function nudge(i, d) {
   const c = S.chunks[i], prev = S.chunks[i - 1];
   const min = prev ? prev.start + 0.1 : 0, max = c.end - 0.1;
@@ -570,6 +627,8 @@ const goTab = name => $(`.tabs button[data-tab="${name}"]`).click();
 
 /* ---------- script ---------- */
 $('#script').value = S.script;
+$('#heads').value = S.headlines || '';
+$('#heads').addEventListener('input', e => { S.headlines = e.target.value; computeHeads(); save(); renderTimeline(); });
 $('#wpc').value = S.wpc; $('#wpcOut').textContent = S.wpc;
 $('#script').addEventListener('input', e => { S.script = e.target.value; save(); });
 $('#wpc').addEventListener('input', e => { S.wpc = +e.target.value; $('#wpcOut').textContent = S.wpc; save(); });
@@ -648,25 +707,25 @@ $$('#qStyles .chip').forEach(c => c.onclick = () => { S.quoteStyle = c.dataset.q
 /* ---------- Claude picks quotes ---------- */
 $('#ai').onclick = async () => {
   const st = $('#aiStatus'); st.classList.remove('err');
-  if (!S.chunks.length) { st.textContent = 'Make captions from your script first.'; return; }
-  if (!sample) { st.textContent = 'Claude isn’t available in this view. Tap ★ next to lines in Timing instead.'; return; }
-  $('#ai').disabled = true; st.textContent = 'Claude is reading your script…';
-  const list = S.chunks.map((c, i) => i + ': ' + c.text).join('\n');
-  const prompt = `You pick on-screen quote moments for a short talking-head video (Reels/TikTok). Below is the script split into numbered caption chunks, in spoken order.
-Choose the 3 to 5 strongest lines: the hook near the start, the turning point, and the closing line. Each pick is a range of consecutive chunks that together form one complete, punchy statement of at most 12 words. Prefer lines that would make someone stop scrolling. Never paraphrase; only choose ranges. Ranges must not overlap.
-Return only JSON, nothing else: {"quotes":[[firstIndex,lastIndex], ...]}
+  if (!S.script.trim()) { st.textContent = 'Paste your script in the Script tab first.'; return; }
+  if (!sample) { st.textContent = 'Claude isn’t available here. Type your quotes above, one per line.'; return; }
+  $('#ai').disabled = true; st.textContent = 'Claude is writing your quote cards…';
+  const n = clamp(Math.round((dur() || 60) / 12), 3, 7);
+  const prompt = `You write the big on-screen quote cards for a short talking-head reel, like text overlays made in Instagram Edits. The script is below.
+Write ${n} quote cards, in the order the ideas come up in the script. Each card is 1 or 2 short sentences, 6 to 16 words in total, a punchy statement that makes sense on its own without sound, for example: "Scrolling isn't resting. You stand up feeling worse than you sat down."
+Reuse the script's own key words in each card, so the card can be matched to the moment it is said. Write in the script's language. No hashtags, no emojis, no quotation marks.
+Return only JSON, nothing else: {"quotes":["card one","card two"]}
 
-Chunks:
-${list}`;
+Script:
+${S.script}`;
   try {
     const res = await sample.json(prompt, { modelTier: 'default' });
-    const qs = (res && Array.isArray(res.quotes)) ? res.quotes : [];
-    let n = 0; S.chunks.forEach(c => c.q = false);
-    qs.forEach(r => { const a = clamp(+r[0] | 0, 0, S.chunks.length - 1), b = clamp(+r[1] | 0, a, Math.min(S.chunks.length - 1, a + 4)); for (let i = a; i <= b; i++) S.chunks[i].q = true; n++; });
-    changed(); st.textContent = n ? `${n} quotes picked. Play them below, remove any that don’t land.` : 'Claude didn’t find clear quote lines. Tap ★ in Timing to choose your own.';
+    const qs = (res && Array.isArray(res.quotes)) ? res.quotes.filter(q => typeof q === 'string' && q.trim()).map(q => q.trim().replace(/^["“]|["”]$/g, '')) : [];
+    if (qs.length) { S.headlines = qs.join('\n'); $('#heads').value = S.headlines; changed(); st.textContent = `${qs.length} quote cards written and placed where you say them. Edit any line above.`; }
+    else st.textContent = 'Claude came back empty. Try again, or type your own above.';
   } catch (e) {
     st.classList.add('err');
-    st.textContent = e && e.code === 'not_granted' ? 'Claude wasn’t allowed. Tap ★ next to lines in Timing to choose quotes yourself.' : e && e.code === 'rate_limited' ? 'Too many requests right now. Try again in a minute.' : 'Couldn’t pick quotes. Try again, or tap ★ in Timing.';
+    st.textContent = e && e.code === 'not_granted' ? 'Claude wasn’t allowed. Type your quotes above, one per line.' : e && e.code === 'rate_limited' ? 'Too many requests right now. Try again in a minute.' : 'Couldn’t write the quotes. Try again, or type your own above.';
   } finally { $('#ai').disabled = false; }
 };
 
@@ -725,7 +784,7 @@ $('#auto').onclick = async () => {
     st.textContent = 'Step 1 of 4: finding the pauses…'; await analysisP;
     st.textContent = 'Step 2 of 4: placing captions over your speech…';
     S.chunks = makeChunks(S.script, S.wpc); spreadEvenly(); changed();
-    if (sample) { st.textContent = 'Step 3 of 4: Claude is picking the quotes…'; await $('#ai').onclick(); }
+    if (sample) { st.textContent = 'Step 3 of 4: Claude is writing the quote cards…'; await $('#ai').onclick(); }
     st.textContent = 'Step 4 of 4: exporting. Keep this screen open.';
     goTab('export'); await $('#exp').onclick();
     st.textContent = 'Done. Check the result before you post it.';
@@ -734,8 +793,8 @@ $('#auto').onclick = async () => {
 
 /* ---------- init ---------- */
 syncSliders(); renderRows(); renderQuotes(); updateTap();
-if (document.fonts) ['800 40px Archivo', '40px Anton', 'italic 600 40px Fraunces', '700 40px "Courier Prime"'].forEach(f => document.fonts.load(f).catch(() => {}));
-if (!(window.claude && claude.use)) { $('#ai').textContent = 'Pick quotes with ★ in Timing'; $('#ai').disabled = true; }
+if (document.fonts) ['800 40px Archivo', '40px Anton', 'italic 600 40px Fraunces', '700 40px "Courier Prime"', '400 40px "Instrument Serif"'].forEach(f => document.fonts.load(f).catch(() => {}));
+if (!(window.claude && claude.use)) { $('#ai').textContent = 'Claude writes cards only inside Claude'; $('#ai').disabled = true; }
 if (window.claude && claude.use) {
   claude.use('sample').then(s => { sample = s; if (!s) $('#ai').textContent = 'Pick quotes with ★ in Timing'; });
   claude.use('downloads').then(d => { downloads = d; });
