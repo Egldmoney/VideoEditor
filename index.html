@@ -51,6 +51,7 @@ canvas{display:block;max-width:100%;max-height:64vh;width:auto;height:auto;touch
 .pane.on{display:grid;gap:14px}
 h2{margin:0;font:800 17px/1.2 Archivo,sans-serif}
 .pane p{margin:0;color:var(--muted);font-size:13.5px}
+select{border:1px solid var(--line);background:var(--panel2);border-radius:10px;padding:9px 10px;font-weight:700}
 textarea{width:100%;min-height:210px;resize:vertical;border:1px solid var(--line);border-radius:10px;background:var(--panel2);padding:12px;line-height:1.5}
 .btn{border:0;border-radius:10px;padding:11px 16px;font-weight:700;cursor:pointer;background:var(--panel2);border:1px solid var(--line)}
 .btn.pri{background:var(--accent);color:var(--ink);border-color:transparent}
@@ -132,15 +133,23 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 
     <div class="pane on" data-pane="script">
       <h2>Paste the script you read</h2>
-      <p>Use the exact words you say in the video. Each sentence gets cut into short caption lines.</p>
+      <p>Use the exact words you say in the video. Spontaneous clip with no script? Leave this empty and tap Do it all: the app listens and writes the captions itself.</p>
       <textarea id="script" placeholder="Paste your script here…"></textarea>
       <div class="field">
         <label for="wpc">Words per caption <output id="wpcOut">4</output></label>
         <input type="range" id="wpc" min="2" max="8" step="1" value="4">
       </div>
       <button class="btn pri" id="auto">Do it all: captions, cuts, quotes, export</button>
-      <button class="btn" id="make">Only make captions</button>
+      <button class="btn" id="make">Only make captions from the script</button>
       <div class="status" id="makeStatus"></div>
+      <div class="sep"></div>
+      <h2>No script: let the app listen</h2>
+      <p>Runs on your phone, nothing is uploaded. The first time it downloads a speech model (about 40–80 MB), after that it starts right away.</p>
+      <div class="row2">
+        <select id="asrLang" aria-label="Spoken language"><option value="auto">Detect language</option><option value="english">English</option><option value="dutch">Dutch</option><option value="romanian">Romanian</option></select>
+        <select id="asrModel" aria-label="Speech model"><option value="Xenova/whisper-base">Accurate</option><option value="Xenova/whisper-tiny">Fast</option></select>
+      </div>
+      <button class="btn" id="transcribe">Transcribe my voice</button>
     </div>
 
     <div class="pane" data-pane="timing">
@@ -256,7 +265,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 const $ = s => document.querySelector(s), $$ = s => [...document.querySelectorAll(s)];
 const video = $('#vid'), cv = $('#cv'), ctx = cv.getContext('2d');
 const ACCENTS = ['#FFD84D', '#FF6B57', '#5BE3B0', '#7CB8FF', '#FFFFFF'];
-let S = { script:'', wpc:4, chunks:[], showCaps:true, capStyle:'word', quoteStyle:'slab', accent:'#FFD84D', capY:0.68, quoteY:0.3, capScale:1, quoteScale:1, rhythm:true, zoomCuts:true, beat:2, cutOn:true, sens:0.35, minSil:0.45, allQuotes:false, autoTimed:false, headlines:'' };
+let S = { script:'', wpc:4, chunks:[], showCaps:true, capStyle:'word', quoteStyle:'slab', accent:'#FFD84D', capY:0.68, quoteY:0.3, capScale:1, quoteScale:1, rhythm:true, zoomCuts:true, beat:2, cutOn:true, sens:0.35, minSil:0.45, allQuotes:false, autoTimed:false, headlines:'', asrLang:'auto', asrModel:'Xenova/whisper-base', asrScript:false };
 try { const saved = JSON.parse(localStorage.getItem('cs-state') || 'null'); if (saved) S = Object.assign(S, saved); } catch (e) {}
 if (!S.v2) { S.capStyle = 'word'; S.allQuotes = false; S.quoteY = 0.3; S.capY = 0.68; S.v2 = true; }
 let HEADS = [];
@@ -290,7 +299,7 @@ function spreadEvenly() {
   const s2r = x => { for (const s of segs) { const L = s[1] - s[0]; if (x < L - 1e-6) return s[0] + x; x -= L; } return segs[segs.length - 1][1]; };
   const wts = S.chunks.map(c => words(c.text).length + (c.se ? 0.7 : 0));
   const W = wts.reduce((a, b) => a + b, 0) || 1; let x = 0;
-  S.chunks.forEach((c, i) => { c.start = s2r(x); x += T * wts[i] / W; c.end = s2r(x - 1e-4) + 1e-4; });
+  S.chunks.forEach((c, i) => { delete c.wt; c.start = s2r(x); x += T * wts[i] / W; c.end = s2r(x - 1e-4) + 1e-4; });
   S.autoTimed = true;
 }
 
@@ -334,6 +343,7 @@ function jumpTo(t) {
   video.addEventListener('seeked', done); video.currentTime = t; setTimeout(done, 800);
 }
 function wordTimes(c) {
+  if (c.wt && c.wt.length === words(c.text).length) return c.wt;
   const w = words(c.text); const lens = w.map(x => x.length + 2); const L = lens.reduce((a, b) => a + b, 0);
   let t = c.start; const d = Math.max(0.05, c.end - c.start);
   return w.map((x, i) => { const s = t; t += d * lens[i] / L; return s; });
@@ -552,7 +562,7 @@ function changed() { computeHeads(); save(); renderTimeline(); renderRows(); ren
 function nudge(i, d) {
   const c = S.chunks[i], prev = S.chunks[i - 1];
   const min = prev ? prev.start + 0.1 : 0, max = c.end - 0.1;
-  c.start = clamp(c.start + d, min, max); if (prev) prev.end = c.start; S.autoTimed = false;
+  c.start = clamp(c.start + d, min, max); if (prev) prev.end = c.start; S.autoTimed = false; delete c.wt;
   save(); renderTimeline(); const r = $(`.r[data-i="${i}"] .t`); if (r) r.textContent = fmt(c.start); renderQuotes();
   seek(c.start + 0.01);
 }
@@ -607,7 +617,8 @@ $('#file').addEventListener('change', e => {
   const f = e.target.files[0]; if (!f) return;
   if (video.src) URL.revokeObjectURL(video.src);
   video.src = URL.createObjectURL(f); video.load();
-  envDb = null; cuts = []; keeps = []; audioDur = 0; analysisP = analyzeAudio(f);
+  envDb = null; cuts = []; keeps = []; audioDur = 0; analysisP = analyzeAudio(f); lastFile = f;
+  if (S.asrScript) { S.script = ''; S.headlines = ''; S.chunks = []; S.asrScript = false; $('#script').value = ''; $('#heads').value = ''; changed(); }
 });
 video.addEventListener('loadedmetadata', () => {
   const vw = video.videoWidth || 1080, vh = video.videoHeight || 1920; const s = Math.min(1, 1920 / Math.max(vw, vh));
@@ -660,7 +671,7 @@ $('#syncStart').onclick = () => {
 };
 function doTap() {
   if (syncI < 0 || syncI >= S.chunks.length) return;
-  const t = video.currentTime, c = S.chunks[syncI]; S.autoTimed = false;
+  const t = video.currentTime, c = S.chunks[syncI]; S.autoTimed = false; delete c.wt;
   c.start = t; c.end = Math.min(dur(), t + words(c.text).length * 0.45);
   if (syncI > 0) S.chunks[syncI - 1].end = t;
   syncI++; renderTimeline(); updateTap();
@@ -708,7 +719,12 @@ $$('#qStyles .chip').forEach(c => c.onclick = () => { S.quoteStyle = c.dataset.q
 $('#ai').onclick = async () => {
   const st = $('#aiStatus'); st.classList.remove('err');
   if (!S.script.trim()) { st.textContent = 'Paste your script in the Script tab first.'; return; }
-  if (!sample) { st.textContent = 'Claude isn’t available here. Type your quotes above, one per line.'; return; }
+  if (!sample) {
+    const cards = autoCards();
+    if (cards.length) { S.headlines = cards.join('\n'); $('#heads').value = S.headlines; changed(); st.textContent = `${cards.length} quote cards picked from what you said. Edit any line above.`; }
+    else st.textContent = 'No usable sentences yet. Transcribe or paste a script first.';
+    return;
+  }
   $('#ai').disabled = true; st.textContent = 'Claude is writing your quote cards…';
   const n = clamp(Math.round((dur() || 60) / 12), 3, 7);
   const prompt = `You write the big on-screen quote cards for a short talking-head reel, like text overlays made in Instagram Edits. The script is below.
@@ -773,18 +789,90 @@ $('#exp').onclick = async () => {
   offerSave();
 };
 
+/* ---------- speech recognition (no script) ---------- */
+let asr = null, asrFor = '', lastFile = null;
+async function getASR(st) {
+  if (asr && asrFor === S.asrModel) return asr;
+  st.textContent = 'Loading the speech model…';
+  const T = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.1');
+  T.env.allowLocalModels = false;
+  asr = await T.pipeline('automatic-speech-recognition', S.asrModel, { progress_callback: pr => { if (pr.status === 'progress' && /\.onnx/.test(pr.file || '')) st.textContent = `Downloading the speech model… ${Math.round(pr.progress || 0)}%`; } });
+  asrFor = S.asrModel; return asr;
+}
+function buildWords(out) {
+  const res = [], arr = out.chunks || [];
+  arr.forEach((c, k) => {
+    const ts = c.timestamp || [0, null]; const s = ts[0] || 0; let e = ts[1];
+    if (e == null) e = (arr[k + 1] && arr[k + 1].timestamp && arr[k + 1].timestamp[0]) || s + 0.5;
+    const w = words(c.text || ''), L = w.reduce((a, x) => a + x.length + 1, 0) || 1; let t = s;
+    w.forEach(x => { const d = (e - s) * (x.length + 1) / L; res.push({ w: x, s: t, e: t + d }); t += d; });
+  });
+  if (!res.length && out.text) { const w = words(out.text), D = dur() || w.length * 0.4; w.forEach((x, i) => res.push({ w: x, s: D * i / w.length, e: D * (i + 1) / w.length })); }
+  return res;
+}
+function chunksFromWords(ws, wpc) {
+  const out = []; let cur = [];
+  const flush = () => { if (!cur.length) return; const last = cur[cur.length - 1]; out.push({ text: cur.map(x => x.w).join(' '), start: cur[0].s, end: last.e, q: false, se: /[.!?…]$/.test(last.w), wt: cur.map(x => x.s) }); cur = []; };
+  ws.forEach(w => { if (cur.length && (cur.length >= wpc || w.s - cur[cur.length - 1].e > 0.5)) flush(); cur.push(w); if (/[.!?…]$/.test(w.w)) flush(); });
+  flush();
+  out.forEach((c, i) => { const n = out[i + 1]; if (n && n.start - c.end < 0.6) c.end = n.start; });
+  return out;
+}
+async function transcribe() {
+  const st = $('#makeStatus'); st.classList.remove('err');
+  if (!lastFile || !hasVideo) { st.textContent = 'Open a video first.'; return false; }
+  $('#transcribe').disabled = true;
+  try {
+    const pipe = await getASR(st);
+    st.textContent = 'Reading the audio…';
+    const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    const ab = await decode(new OAC(1, 1, 16000), await lastFile.arrayBuffer());
+    let pcm = ab.getChannelData(0);
+    if (ab.numberOfChannels > 1) { const r = ab.getChannelData(1), m = new Float32Array(pcm.length); for (let i = 0; i < m.length; i++) m[i] = (pcm[i] + r[i]) / 2; pcm = m; }
+    st.textContent = 'Listening to what you say… this takes about as long as the video.';
+    const opts = { chunk_length_s: 30, stride_length_s: 5, return_timestamps: 'word' };
+    if (S.asrLang !== 'auto') { opts.language = S.asrLang; opts.task = 'transcribe'; }
+    let out; try { out = await pipe(pcm, opts); } catch (e) { out = await pipe(pcm, Object.assign({}, opts, { return_timestamps: true })); }
+    const ws = buildWords(out);
+    if (!ws.length) { st.textContent = 'No speech found in this clip.'; return false; }
+    S.script = ws.map(w => w.w).join(' '); $('#script').value = S.script; S.asrScript = true;
+    S.chunks = chunksFromWords(ws, S.wpc); S.autoTimed = false; changed();
+    st.textContent = `Heard ${ws.length} words. Fix anything misheard in the Timing tab.`;
+    return true;
+  } catch (e) {
+    st.classList.add('err');
+    st.textContent = /import|fetch|module|Failed|network|CSP|Content Security/i.test(String(e && e.message || e)) ? 'Speech recognition can’t load in this view. It works in your GitHub version of the app.' : 'Couldn’t transcribe this clip. Try the Fast model or a shorter clip.';
+    return false;
+  } finally { $('#transcribe').disabled = false; }
+}
+function autoCards() {
+  const sents = []; let cur = null;
+  S.chunks.forEach(c => { if (!cur) cur = { text: '', start: c.start }; cur.text += (cur.text ? ' ' : '') + c.text; if (c.se) { sents.push(cur); cur = null; } });
+  if (cur) sents.push(cur);
+  const D = dur() || 60, n = clamp(Math.round(D / 12), 2, 7), picks = [];
+  for (let k = 0; k < n; k++) {
+    const a = k * D / n, b = (k + 1) * D / n; let best = null, bs = -1e9;
+    sents.forEach(s => { const wc = words(s.text).length; if (s.start < a || s.start >= b || wc < 5 || wc > 18) return; const sc = -Math.abs(wc - 10) + (/\b(you|your|never|stop|only|enough)\b/i.test(s.text) ? 2 : 0); if (sc > bs) { bs = sc; best = s; } });
+    if (best) picks.push(best.text);
+  }
+  return picks;
+}
+$('#transcribe').onclick = () => transcribe();
+$('#asrLang').value = S.asrLang; $('#asrModel').value = S.asrModel;
+$('#asrLang').onchange = e => { S.asrLang = e.target.value; save(); };
+$('#asrModel').onchange = e => { S.asrModel = e.target.value; save(); };
+
 /* ---------- one-tap automation ---------- */
 $('#auto').onclick = async () => {
   const st = $('#makeStatus');
   if (!hasVideo) { st.textContent = 'Open a video first.'; return; }
-  if (!S.script.trim()) { st.textContent = 'Paste your script first.'; return; }
   if (exporting) return;
   $('#auto').disabled = true;
   try {
     st.textContent = 'Step 1 of 4: finding the pauses…'; await analysisP;
-    st.textContent = 'Step 2 of 4: placing captions over your speech…';
-    S.chunks = makeChunks(S.script, S.wpc); spreadEvenly(); changed();
-    if (sample) { st.textContent = 'Step 3 of 4: Claude is writing the quote cards…'; await $('#ai').onclick(); }
+    if (!S.script.trim()) { if (!(await transcribe())) return; }
+    else { st.textContent = 'Step 2 of 4: placing captions over your speech…'; S.chunks = makeChunks(S.script, S.wpc); spreadEvenly(); changed(); }
+    st.textContent = 'Step 3 of 4: writing the quote cards…'; await $('#ai').onclick();
     st.textContent = 'Step 4 of 4: exporting. Keep this screen open.';
     goTab('export'); await $('#exp').onclick();
     st.textContent = 'Done. Check the result before you post it.';
@@ -794,7 +882,7 @@ $('#auto').onclick = async () => {
 /* ---------- init ---------- */
 syncSliders(); renderRows(); renderQuotes(); updateTap();
 if (document.fonts) ['800 40px Archivo', '40px Anton', 'italic 600 40px Fraunces', '700 40px "Courier Prime"', '400 40px "Instrument Serif"'].forEach(f => document.fonts.load(f).catch(() => {}));
-if (!(window.claude && claude.use)) { $('#ai').textContent = 'Claude writes cards only inside Claude'; $('#ai').disabled = true; }
+if (!(window.claude && claude.use)) { $('#ai').textContent = 'Pick quote cards from what I said'; }
 if (window.claude && claude.use) {
   claude.use('sample').then(s => { sample = s; if (!s) $('#ai').textContent = 'Pick quotes with ★ in Timing'; });
   claude.use('downloads').then(d => { downloads = d; });
