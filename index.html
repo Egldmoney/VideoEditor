@@ -371,17 +371,17 @@ function rr(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x 
 
 const STOP = new Set('the a an and or but to of in on at for is are was were be been it its this that with as by from i you we they he she my your our me us so if not no do does did have has had just than then there here what when who how why all can will would im its dont thats'.split(' '));
 function keyWord(ws) { let k = -1, best = 0; ws.forEach((w, i) => { const s = w.toLowerCase().replace(/[^a-z0-9\u00C0-\u024F]/g, ''); if (!s || STOP.has(s)) return; if (s.length >= best) { best = s.length; k = i; } }); return k < 0 ? ws.length - 1 : k; }
-function drawCaption(c, t, ci) {
+function drawCaption(c, t, ci, box) {
   if (S.capStyle === 'word') {
     const W = cv.width, H = cv.height, ws = words(c.text), times = wordTimes(c);
     let j = 0; times.forEach((wt, k) => { if (t >= wt) j = k; });
     const size = W * 0.08 * S.capScale, k = clamp((t - times[j]) / 0.12, 0, 1), sc = 1 + 0.12 * (1 - easeOut(k));
-    ctx.save(); ctx.translate(W / 2, S.capY * H); ctx.scale(sc, sc);
+    ctx.save(); ctx.translate(W / 2, avoid(S.capY * H, size * 0.75, box)); ctx.scale(sc, sc);
     ctx.font = `400 ${size}px "Instrument Serif", "DM Serif Display", Georgia, serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.shadowColor = 'rgba(0,0,0,.75)'; ctx.shadowBlur = size * 0.25; ctx.shadowOffsetY = size * 0.04;
     ctx.fillStyle = '#FFFFFF'; ctx.fillText(ws[j] || '', 0, 0); ctx.restore(); return;
   }
-  const W = cv.width, H = cv.height, v = S.rhythm ? ci % 3 : 0;
+  const W = cv.width, H = cv.height, v = (S.rhythm && !box) ? ci % 3 : 0;
   const st = v === 2 ? 'inv' : S.capStyle, base = W * 0.066 * S.capScale, sp = base * 0.28;
   const font = s => `800 ${s}px Archivo, "Arial Black", sans-serif`;
   const ws = words(c.text), times = wordTimes(c), key = v === 1 ? keyWord(ws) : -1;
@@ -397,7 +397,7 @@ function drawCaption(c, t, ci) {
     ln.words.push({ w, i, x, width: wd, s }); ln.width = x + wd; ln.size = Math.max(ln.size, s);
   });
   const hs = lines.map(l => l.size * 1.16), total = hs.reduce((a, b) => a + b, 0);
-  const cy = S.capY * H; let y = cy - total / 2;
+  const cy = avoid(S.capY * H, total / 2 + base * 0.3, box); let y = cy - total / 2;
   let active = -1; times.forEach((wt, j) => { if (t >= wt) active = j; });
   const k = clamp((t - c.start) / 0.16, 0, 1); const sc = (st === 'pop' || S.rhythm) ? 1 + 0.14 * (1 - easeOut(k)) : 1;
   ctx.save(); ctx.translate(W / 2, cy); ctx.scale(sc, sc); if (st === 'inv') ctx.rotate(-0.04); ctx.translate(-W / 2, -cy);
@@ -484,20 +484,31 @@ function computeHeads() {
   HEADS = res;
 }
 const HEAD_COLORS = [['#FFE14D', '#2B2300'], ['#FFB25E', '#3A1800'], ['#FF3B2E', '#140000'], ['#FFFFFF', '#1B1D22']];
-function drawHead(h, t) {
-  const W = cv.width, H = cv.height, n = h.idx % HEAD_COLORS.length, [fill, shade] = HEAD_COLORS[n];
-  const size = W * 0.092 * S.quoteScale;
+function headLayout(h) {
+  const W = cv.width, H = cv.height, n = h.idx % HEAD_COLORS.length, size = W * 0.092 * S.quoteScale;
   ctx.font = `${n === 2 ? 'italic ' : ''}${size}px Anton, Impact, "Arial Black", sans-serif`; ctx.textBaseline = 'middle';
   const lines = layout(words(h.text.toUpperCase()), W * 0.78, size * 0.22), lh = size * 1.06;
-  const x0 = W * 0.08, y0 = S.quoteY * H - lines.length * lh / 2, depth = size * 0.1, out = clamp((h.end - t) / 0.2, 0, 1);
-  lines.forEach((ln, li) => {
+  const y0 = clamp(S.quoteY * H - lines.length * lh / 2, H * 0.04, H * 0.96 - lines.length * lh);
+  return { W, H, n, size, lines, lh, x0: W * 0.08, y0, top: y0 - size * 0.12, bottom: y0 + lines.length * lh + size * 0.18 };
+}
+function drawHead(h, t) {
+  const L = headLayout(h), [fill, shade] = HEAD_COLORS[L.n], size = L.size, depth = size * 0.1, out = clamp((h.end - t) / 0.2, 0, 1);
+  L.lines.forEach((ln, li) => {
     const a = easeOut(clamp((t - h.start - li * 0.07) / 0.22, 0, 1)); if (a <= 0) return;
-    const x = x0 - (1 - a) * size * 0.8, y = y0 + lh * (li + 0.5), txt = ln.words.map(w => w.w).join(' ');
+    const x = L.x0 - (1 - a) * size * 0.8, y = L.y0 + L.lh * (li + 0.5), txt = ln.words.map(w => w.w).join(' ');
     ctx.save(); ctx.globalAlpha = a * out;
     ctx.fillStyle = shade; for (let d = depth; d > 0; d -= Math.max(1, depth / 8)) ctx.fillText(txt, x + d * 0.55, y + d);
     ctx.lineJoin = 'round'; ctx.lineWidth = size * 0.06; ctx.strokeStyle = shade; ctx.strokeText(txt, x, y);
     ctx.fillStyle = fill; ctx.fillText(txt, x, y); ctx.restore();
   });
+}
+/* keep a caption clear of the quote card: below it, or above it if there's no room */
+function avoid(cy, half, box) {
+  if (!box) return cy;
+  const H = cv.height, gap = H * 0.025;
+  if (cy + half < box.top - gap || cy - half > box.bottom + gap) return cy;
+  const below = box.bottom + gap + half;
+  return below + half <= H * 0.95 ? below : Math.max(half + H * 0.03, box.top - gap - half);
 }
 
 let lastLayer = 'cap';
@@ -511,12 +522,12 @@ function render(t) {
     ctx.drawImage(video, (vw - sw) * (b % 2 ? 0.44 : 0.56), (vh - sh) * 0.38, sw, sh, 0, 0, cv.width, cv.height);
   } else ctx.drawImage(video, 0, 0, cv.width, cv.height);
   const i = activeIndex(t); lastLayer = 'cap';
+  const hd = HEADS.find(h => t >= h.start && t < h.end), box = hd ? headLayout(hd) : null;
   if (i >= 0) {
-    if (S.chunks[i].q) { const g = groups().find(g => i >= g.a && i <= g.b); lastLayer = 'quote'; drawQuote(g, t); }
-    else if (S.allQuotes) { lastLayer = 'quote'; drawQuote({ a: i, b: i }, t, true); }
-    else if (S.showCaps) drawCaption(S.chunks[i], t, i);
+    if (!hd && S.chunks[i].q) { const g = groups().find(g => i >= g.a && i <= g.b); lastLayer = 'quote'; drawQuote(g, t); }
+    else if (!hd && S.allQuotes) { lastLayer = 'quote'; drawQuote({ a: i, b: i }, t, true); }
+    else if (S.showCaps || hd) drawCaption(S.chunks[i], t, i, box);
   }
-  const hd = HEADS.find(h => t >= h.start && t < h.end);
   if (hd) { lastLayer = 'quote'; drawHead(hd, t); }
 }
 
@@ -589,7 +600,7 @@ function loop() {
   if (D) $('#head').style.left = (t / D * 100) + '%';
   const i = activeIndex(t);
   if (i !== rowActive) { $$('.r.on').forEach(r => r.classList.remove('on')); const r = $(`.r[data-i="${i}"]`); if (r) r.classList.add('on'); rowActive = i; }
-  if (exporting && D) $('#progBar').style.width = (t / D * 100) + '%';
+  if (exporting && !wcExport && D) $('#progBar').style.width = (t / D * 100) + '%';
 }
 requestAnimationFrame(loop);
 
@@ -764,7 +775,7 @@ async function offerSave() {
   $('#saveAgain').hidden = false;
 }
 $('#saveAgain').onclick = offerSave;
-$('#exp').onclick = async () => {
+async function exportMR() {
   const st = $('#expStatus'); st.classList.remove('err');
   if (!cv.captureStream || !window.MediaRecorder) { st.classList.add('err'); st.textContent = 'This browser can’t record video. Try Chrome, or update Safari.'; return; }
   if (syncI >= 0) finishSync();
@@ -787,6 +798,78 @@ $('#exp').onclick = async () => {
   lastExport = { blob: new Blob(parts, { type }), ext: type.includes('mp4') ? 'mp4' : 'webm' };
   st.textContent = `Done. ${(lastExport.blob.size / 1048576).toFixed(1)} MB ${lastExport.ext.toUpperCase()}.`;
   offerSave();
+}
+
+let wcExport = false;
+const waitFrame = () => new Promise(res => { let done = false; const fin = () => { if (!done) { done = true; res(); } }; if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(fin); setTimeout(fin, 120); });
+async function seekExact(t) { video.currentTime = t; await once(video, 'seeked', 1500); await waitFrame(); }
+async function exportWC() {
+  const st = $('#expStatus');
+  const M = await import('https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.1/+esm');
+  const W = cv.width, H = cv.height, fps = 30, sr = 48000;
+  let vcfg = null;
+  for (const codec of ['avc1.640028', 'avc1.4d0028', 'avc1.42e028']) { const c = { codec, width: W, height: H, bitrate: 8e6, framerate: fps }; try { if ((await VideoEncoder.isConfigSupported(c)).supported) { vcfg = c; break; } } catch (e) {} }
+  if (!vcfg) throw new Error('no h264');
+  st.textContent = 'Preparing the audio…';
+  let ab = null; try { const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext; ab = await decode(new OAC(2, 1, sr), await lastFile.arrayBuffer()); } catch (e) {}
+  const nch = ab ? Math.min(2, ab.numberOfChannels) : 0;
+  let acfg = null;
+  if (ab) for (const [codec, mc] of [['mp4a.40.2', 'aac'], ['opus', 'opus']]) { const c = { codec, sampleRate: sr, numberOfChannels: nch, bitrate: 160000 }; try { if ((await AudioEncoder.isConfigSupported(c)).supported) { acfg = { c, mc }; break; } } catch (e) {} }
+  const muxer = new M.Muxer({ target: new M.ArrayBufferTarget(), fastStart: 'in-memory', video: { codec: 'avc', width: W, height: H, frameRate: fps }, audio: acfg ? { codec: acfg.mc, numberOfChannels: nch, sampleRate: sr } : undefined });
+  let encErr = null;
+  const venc = new VideoEncoder({ output: (ch, meta) => muxer.addVideoChunk(ch, meta), error: e => encErr = e });
+  venc.configure(vcfg);
+  const segs = (S.cutOn && keeps.length) ? keeps : [[0, dur()]];
+  const total = segs.reduce((a, s) => a + s[1] - s[0], 0), nFrames = Math.max(1, Math.round(total * fps));
+  let f = 0;
+  for (const [a, b] of segs) {
+    for (let t = a; t < b - 0.5 / fps; t += 1 / fps) {
+      if (encErr) throw encErr;
+      await seekExact(t); render(t);
+      const vf = new VideoFrame(cv, { timestamp: Math.round(f * 1e6 / fps), duration: Math.round(1e6 / fps) });
+      venc.encode(vf, { keyFrame: f % (fps * 2) === 0 }); vf.close(); f++;
+      while (venc.encodeQueueSize > 8) await new Promise(r => setTimeout(r, 5));
+      if (f % 5 === 0) { $('#progBar').style.width = (f / nFrames * 90) + '%'; st.textContent = `Rendering frame ${f} of ${nFrames}… keep this screen open.`; }
+    }
+  }
+  await venc.flush();
+  if (acfg) {
+    st.textContent = 'Adding the sound…';
+    const outLen = Math.round(f / fps * sr), chans = []; for (let c = 0; c < nch; c++) chans.push(new Float32Array(outLen));
+    let o = 0;
+    for (const [a, b] of segs) { const s0 = Math.round(a * sr), s1 = Math.min(ab.length, Math.round(b * sr)); for (let c = 0; c < nch; c++) { const src = ab.getChannelData(c).subarray(s0, s1); chans[c].set(src.subarray(0, Math.max(0, Math.min(src.length, outLen - o))), o); } o += s1 - s0; if (o >= outLen) break; }
+    const aenc = new AudioEncoder({ output: (ch, meta) => muxer.addAudioChunk(ch, meta), error: e => encErr = e });
+    aenc.configure(acfg.c);
+    for (let i = 0; i < outLen; i += 4800) {
+      const n = Math.min(4800, outLen - i), buf = new Float32Array(n * nch);
+      for (let c = 0; c < nch; c++) buf.set(chans[c].subarray(i, i + n), c * n);
+      const ad = new AudioData({ format: 'f32-planar', sampleRate: sr, numberOfFrames: n, numberOfChannels: nch, timestamp: Math.round(i * 1e6 / sr), data: buf });
+      aenc.encode(ad); ad.close();
+      while (aenc.encodeQueueSize > 16) await new Promise(r => setTimeout(r, 5));
+    }
+    await aenc.flush();
+  }
+  if (encErr) throw encErr;
+  muxer.finalize();
+  return new Blob([muxer.target.buffer], { type: 'video/mp4' });
+}
+$('#exp').onclick = async () => {
+  const st = $('#expStatus'); st.classList.remove('err');
+  if (exporting) return;
+  if (window.VideoEncoder && window.VideoFrame && lastFile) {
+    if (syncI >= 0) finishSync();
+    exporting = true; wcExport = true; $('#exp').disabled = true; $('#play').disabled = true; $('#saveAgain').hidden = true; video.pause();
+    try {
+      const blob = await exportWC();
+      $('#progBar').style.width = '100%';
+      lastExport = { blob, ext: 'mp4' };
+      st.textContent = `Done. ${(blob.size / 1048576).toFixed(1)} MB MP4.`;
+      offerSave(); return;
+    } catch (e) {
+      st.textContent = 'Switching to the backup recorder…';
+    } finally { exporting = false; wcExport = false; $('#exp').disabled = false; $('#play').disabled = false; }
+  }
+  await exportMR();
 };
 
 /* ---------- speech recognition (no script) ---------- */
